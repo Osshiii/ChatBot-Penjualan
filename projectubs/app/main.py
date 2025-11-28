@@ -1,6 +1,7 @@
 from fastapi import FastAPI
-
+from app.sales_api import router as sales_router
 app = FastAPI()
+app.include_router(sales_router)
 
 @app.get("/")
 def read_root():
