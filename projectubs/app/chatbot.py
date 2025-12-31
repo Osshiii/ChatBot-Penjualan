@@ -6,7 +6,7 @@ Handles conversation logic, query processing, and response generation
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import json
 from datetime import datetime
 
@@ -37,80 +37,97 @@ class SalesDatabase:
         return [r[column] for r in results if r[column]]
 
 class SalesQueryBuilder:
-    """Build SQL queries based on filters"""
+    """Build SQL queries based on filters - Improved version"""
     
     @staticmethod
-    def build_filter_query(filters: Dict) -> tuple:
+    def build_where_clause(filters: Dict) -> Tuple[str, list]:
         """
-        Build WHERE clause and parameters from filters.
-        
-        Returns:
-            Tuple of (where_clause, params)
+        Build dynamic WHERE clause with proper parameterization.
+        Returns: (where_clause_str, params_list)
         """
-        where_parts = ["1=1"]  # Always true condition
-        params = {}
-        param_count = 0
+        where_parts = ["1=1"]
+        params = []
         
-        # Add WHERE conditions based on filters
+        # Code filters (exact match)
         if "kode_barang" in filters:
-            where_parts.append(f"KODE_BARANG = ?")
-            params[param_count] = filters["kode_barang"]
-            param_count += 1
+            where_parts.append("KODE_BARANG = ?")
+            params.append(filters["kode_barang"])
         
         if "lokasi" in filters:
-            where_parts.append(f"LOKASI = ?")
-            params[param_count] = filters["lokasi"]
-            param_count += 1
-        
-        if "bulan" in filters:
-            where_parts.append(f"BULAN = ?")
-            params[param_count] = filters["bulan"]
-            param_count += 1
-        
-        if "tahun" in filters:
-            where_parts.append(f"TAHUN = ?")
-            params[param_count] = filters["tahun"]
-            param_count += 1
+            where_parts.append("LOKASI = ?")
+            params.append(filters["lokasi"])
         
         if "klasifikasi_barang" in filters:
-            where_parts.append(f"KLASIFIKASI_BARANG = ?")
-            params[param_count] = filters["klasifikasi_barang"]
-            param_count += 1
+            where_parts.append("KLASIFIKASI_BARANG = ?")
+            params.append(filters["klasifikasi_barang"])
         
         if "warna_barang" in filters:
-            where_parts.append(f"WARNA_BARANG = ?")
-            params[param_count] = filters["warna_barang"]
-            param_count += 1
+            where_parts.append("WARNA_BARANG = ?")
+            params.append(filters["warna_barang"])
         
         if "ukuran_barang" in filters:
-            where_parts.append(f"UKURAN_BARANG = ?")
-            params[param_count] = filters["ukuran_barang"]
-            param_count += 1
+            where_parts.append("UKURAN_BARANG = ?")
+            params.append(filters["ukuran_barang"])
         
         if "channel" in filters:
-            where_parts.append(f"CHANNEL = ?")
-            params[param_count] = filters["channel"]
-            param_count += 1
+            where_parts.append("CHANNEL = ?")
+            params.append(filters["channel"])
         
+        # Time filters
+        if "bulan" in filters:
+            where_parts.append("BULAN = ?")
+            params.append(filters["bulan"])
+        
+        if "tahun" in filters:
+            where_parts.append("TAHUN = ?")
+            params.append(filters["tahun"])
+        
+        # Date range filters
+        if "date_from" in filters:
+            where_parts.append("TANGGAL >= ?")
+            params.append(filters["date_from"])
+        
+        if "date_to" in filters:
+            where_parts.append("TANGGAL <= ?")
+            params.append(filters["date_to"])
+        
+        # Numeric range filters
         if "min_berat" in filters:
-            where_parts.append(f"BERAT_SATUAN >= ?")
-            params[param_count] = filters["min_berat"]
-            param_count += 1
+            where_parts.append("BERAT_SATUAN >= ?")
+            params.append(filters["min_berat"])
         
         if "max_berat" in filters:
-            where_parts.append(f"BERAT_SATUAN <= ?")
-            params[param_count] = filters["max_berat"]
-            param_count += 1
+            where_parts.append("BERAT_SATUAN <= ?")
+            params.append(filters["max_berat"])
+        
+        if "min_jumlah" in filters:
+            where_parts.append("JUMLAH >= ?")
+            params.append(filters["min_jumlah"])
+        
+        if "max_jumlah" in filters:
+            where_parts.append("JUMLAH <= ?")
+            params.append(filters["max_jumlah"])
         
         where_clause = " AND ".join(where_parts)
-        params_tuple = tuple(params.get(i) for i in range(param_count))
-        
-        return where_clause, params_tuple
+        return where_clause, params
     
     @staticmethod
-    def build_detail_query(filters: Dict, limit: int = 100, offset: int = 0) -> tuple:
-        """Build detailed query with limit/offset"""
-        where_clause, params = SalesQueryBuilder.build_filter_query(filters)
+    def build_count_query(filters: Dict) -> Tuple[str, list]:
+        """
+        Build COUNT query (no LIMIT).
+        Returns total matching records.
+        """
+        where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+        sql = f"SELECT COUNT(*) as total FROM penjualan WHERE {where_clause}"
+        return sql, params
+    
+    @staticmethod
+    def build_detail_query(filters: Dict, limit: int = 5, offset: int = 0) -> Tuple[str, list]:
+        """
+        Build detail query with LIMIT 5 (sample data).
+        Returns: (sql, params)
+        """
+        where_clause, params = SalesQueryBuilder.build_where_clause(filters)
         
         sql = f"""
             SELECT * FROM penjualan
@@ -119,17 +136,23 @@ class SalesQueryBuilder:
             LIMIT ? OFFSET ?
         """
         
-        params_list = list(params) + [limit, offset]
-        return sql, tuple(params_list)
+        params.extend([limit, offset])
+        return sql, params
     
     @staticmethod
-    def build_summary_query(filters: Dict, group_by: str = "KODE_BARANG") -> tuple:
-        """Build summary query with aggregation"""
-        where_clause, params = SalesQueryBuilder.build_filter_query(filters)
+    def build_summary_query(filters: Dict, group_by: str = "KODE_BARANG") -> Tuple[str, list]:
+        """
+        Build aggregation query with GROUP BY.
+        Returns: (sql, params)
+        """
+        where_clause, params = SalesQueryBuilder.build_where_clause(filters)
         
-        # Validate group_by to prevent SQL injection
-        valid_group_by = ["KODE_BARANG", "LOKASI", "BULAN", "TAHUN", "CHANNEL",
-                          "KLASIFIKASI_BARANG", "WARNA_BARANG", "UKURAN_BARANG"]
+        # Validate group_by
+        valid_group_by = [
+            "KODE_BARANG", "LOKASI", "BULAN", "TAHUN", "CHANNEL",
+            "KLASIFIKASI_BARANG", "WARNA_BARANG", "UKURAN_BARANG"
+        ]
+        
         if group_by not in valid_group_by:
             group_by = "KODE_BARANG"
         
@@ -148,6 +171,26 @@ class SalesQueryBuilder:
             ORDER BY total_jumlah DESC
             LIMIT 20
         """
+        
+        return sql, params
+    
+    @staticmethod
+    def build_filter_query(filters: Dict) -> tuple:
+        """
+        Legacy method for backward compatibility.
+        Build WHERE clause and parameters from filters.
+        """
+        where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+        return where_clause, tuple(params)
+        
+        return sql, params
+    
+    @staticmethod
+    def build_count_query(filters: Dict) -> tuple:
+        """Build COUNT query to get total matching records"""
+        where_clause, params = SalesQueryBuilder.build_filter_query(filters)
+        
+        sql = f"SELECT COUNT(*) as total FROM penjualan WHERE {where_clause}"
         
         return sql, params
 
@@ -188,17 +231,41 @@ class JewelrySalesBot:
         # Parse the input
         parsed_query = self.parser.parse(user_message)
         
+        # Check for parse errors
+        if parsed_query.get("error"):
+            return {
+                "query_type": "error",
+                "message": f"❌ Validasi input gagal: {parsed_query['error']}",
+                "data": [],
+                "confidence": 0.0,
+            }
+        
+        # DEBUG: Log parsing result
+        print(f"[DEBUG] User Message: {user_message}")
+        print(f"[DEBUG] Intent: {parsed_query['query_type'].value}")
+        print(f"[DEBUG] Filters: {parsed_query.get('filters', {})}")
+        print(f"[DEBUG] Group By: {parsed_query.get('group_by')}")
+        print(f"[DEBUG] Confidence: {parsed_query.get('confidence', 0):.2f}")
+        
         # Handle different query types
-        if parsed_query["query_type"] == QueryType.HELP:
+        query_type = parsed_query["query_type"]
+        
+        if query_type == QueryType.HELP:
             response = self._handle_help_query()
-        elif parsed_query["query_type"] == QueryType.EXPLORATORY:
-            response = self._handle_exploratory_query(parsed_query)
-        elif parsed_query["query_type"] == QueryType.SUMMARY:
+        elif query_type == QueryType.DETAIL:
+            response = self._handle_detail_query(parsed_query)
+        elif query_type == QueryType.COUNT:
+            response = self._handle_count_query(parsed_query)
+        elif query_type == QueryType.SUMMARY:
             response = self._handle_summary_query(parsed_query)
-        elif parsed_query["query_type"] == QueryType.FILTER:
-            response = self._handle_filter_query(parsed_query)
+        elif query_type == QueryType.EXPLORATORY:
+            response = self._handle_exploratory_query(parsed_query)
         else:
             response = self._handle_unknown_query(parsed_query)
+        
+        # DEBUG: Log SQL if available
+        if "sql" in response:
+            print(f"[DEBUG] SQL: {response['sql']}")
         
         # Store bot response in history
         self.conversation_history.append({
@@ -411,35 +478,150 @@ class JewelrySalesBot:
             "confidence": 0.95,
         }
     
-    def _handle_filter_query(self, parsed_query: Dict) -> Dict[str, Any]:
+    def _handle_detail_query(self, parsed_query: Dict) -> Dict[str, Any]:
+        """Handle detail queries - return sample rows (LIMIT 5)"""
+        filters = parsed_query["filters"].copy()
+        confidence = parsed_query["confidence"]
+        
+        try:
+            # Step 1: Count total matching records
+            count_sql, count_params = SalesQueryBuilder.build_count_query(filters)
+            count_result = self.db.execute_query(count_sql, tuple(count_params))
+            total_records = count_result[0].get("total", 0) if count_result else 0
+            
+            # Step 2: Get sample data (LIMIT 5)
+            detail_sql, detail_params = SalesQueryBuilder.build_detail_query(filters, limit=5, offset=0)
+            
+            print(f"[DEBUG] Count SQL: {count_sql}")
+            print(f"[DEBUG] Detail SQL: {detail_sql}")
+            print(f"[DEBUG] Total: {total_records}")
+            
+            results = self.db.execute_query(detail_sql, tuple(detail_params))
+            
+            # Generate response message
+            if total_records > 0:
+                filter_desc = self._describe_filters(filters)
+                message = (
+                    f"✅ Hasil Pencarian Penjualan\n\n"
+                    f"Menemukan {total_records:,} transaksi penjualan"
+                    f"{f' {filter_desc}' if filter_desc else ''}.\n\n"
+                    f"Ditampilkan 5 data teratas sebagai contoh:\n"
+                    f"{self._format_table(results)}\n\n"
+                    f"📊 Total: {total_records:,} | Sampel: {len(results)}/5\n"
+                    f"💡 Gunakan filter tambahan untuk mempersempit hasil.\n"
+                    f"🎯 Tingkat kepercayaan: {confidence:.0%}"
+                )
+            else:
+                filter_desc = self._describe_filters(filters)
+                message = (
+                    f"❌ Tidak Ada Hasil\n\n"
+                    f"Maaf, saya tidak menemukan data{f' {filter_desc}' if filter_desc else ''}.\n\n"
+                    f"Filter yang digunakan:\n{self._format_filters(filters)}\n\n"
+                    f"💡 Coba gunakan filter berbeda atau tanya 'data apa saja' untuk melihat opsi."
+                )
+            
+            return {
+                "query_type": "detail",
+                "message": message,
+                "data": results,
+                "sql": detail_sql,
+                "filters": filters,
+                "confidence": confidence,
+                "count": total_records,
+                "displayed": len(results),
+            }
+        
+        except Exception as e:
+            print(f"[DEBUG] Error in detail query: {str(e)}")
+            return {
+                "query_type": "detail",
+                "message": f"❌ Error: {str(e)}",
+                "data": [],
+                "sql": "",
+                "filters": filters,
+                "confidence": 0.0,
+                "error": str(e),
+            }
+    
+    def _handle_count_query(self, parsed_query: Dict) -> Dict[str, Any]:
+        """Handle count queries - return just the count"""
+        filters = parsed_query["filters"].copy()
+        confidence = parsed_query["confidence"]
+        
+        try:
+            # Execute count query
+            count_sql, count_params = SalesQueryBuilder.build_count_query(filters)
+            
+            print(f"[DEBUG] Count SQL: {count_sql}")
+            
+            count_result = self.db.execute_query(count_sql, tuple(count_params))
+            total = count_result[0].get("total", 0) if count_result else 0
+            
+            filter_desc = self._describe_filters(filters)
+            message = (
+                f"📊 Hasil Penghitungan\n\n"
+                f"Ditemukan **{total:,} transaksi penjualan**"
+                f"{f' {filter_desc}' if filter_desc else ''}.\n\n"
+                f"🎯 Tingkat kepercayaan: {confidence:.0%}"
+            )
+            
+            return {
+                "query_type": "count",
+                "message": message,
+                "data": [],
+                "sql": count_sql,
+                "filters": filters,
+                "confidence": confidence,
+                "count": total,
+            }
+        
+        except Exception as e:
+            print(f"[DEBUG] Error in count query: {str(e)}")
+            return {
+                "query_type": "count",
+                "message": f"❌ Error: {str(e)}",
+                "data": [],
+                "sql": "",
+                "filters": filters,
+                "confidence": 0.0,
+                "error": str(e),
+            }
         """Handle filter/detail queries"""
         filters = parsed_query["filters"].copy()
         confidence = parsed_query["confidence"]
         
-        # Extract pagination
-        limit = filters.pop("limit", 100)
-        offset = filters.pop("offset", 0)
-        
-        # Limit safety
-        limit = min(limit, 2000)
+        # Extract pagination (but force limit to 5 for display)
+        filters.pop("limit", None)  # Remove user limit
+        filters.pop("offset", None)  # Remove user offset
         
         try:
-            # Build and execute query
-            sql, params = SalesQueryBuilder.build_detail_query(filters, limit, offset)
-            results = self.db.execute_query(sql, params)
+            # Step 1: Count total matching records (no LIMIT)
+            count_sql, count_params = SalesQueryBuilder.build_count_query(filters)
+            count_result = self.db.execute_query(count_sql, count_params)
+            total_records = count_result[0].get("total", 0) if count_result else 0
+            
+            # Step 2: Get sample data (always LIMIT 5)
+            detail_sql, detail_params = SalesQueryBuilder.build_detail_query(filters, limit=5, offset=0)
+            
+            # DEBUG: Log SQL queries
+            print(f"[DEBUG] Filters after extraction: {filters}")
+            print(f"[DEBUG] Count SQL: {count_sql}")
+            print(f"[DEBUG] Detail SQL: {detail_sql}")
+            print(f"[DEBUG] Total Records: {total_records}")
+            
+            results = self.db.execute_query(detail_sql, detail_params)
             
             # Generate conversational response message
-            if results:
+            if total_records > 0:
                 filter_desc = self._describe_filters(filters)
                 message = (
                     f"✅ Hasil Pencarian Penjualan\n\n"
-                    f"Saya menemukan {len(results)} transaksi penjualan"
+                    f"Menemukan {total_records:,} transaksi penjualan"
                     f"{f' {filter_desc}' if filter_desc else ''}.\n\n"
-                    f"Berikut adalah contoh data dari hasil pencarian:\n"
-                    f"{self._format_table(results[:5])}\n\n"
-                    f"📊 Ditampilkan 5 dari {len(results)} hasil. "
-                    f"💡 Gunakan filter tambahan untuk mempersempit hasil atau "
-                    f"tanya 'ringkasan' untuk melihat analisis.\n"
+                    f"Ditampilkan 5 data teratas sebagai contoh:\n"
+                    f"{self._format_table(results)}\n\n"
+                    f"📊 Total: {total_records:,} | Sampel: {len(results)}/5\n"
+                    f"💡 Gunakan filter tambahan untuk mempersempit hasil.\n"
                     f"🎯 Tingkat kepercayaan: {confidence:.0%}"
                 )
             else:
@@ -455,13 +637,15 @@ class JewelrySalesBot:
                 "query_type": "filter",
                 "message": message,
                 "data": results,
-                "sql": sql,
+                "sql": detail_sql,
                 "filters": filters,
                 "confidence": confidence,
-                "count": len(results),
+                "count": total_records,
+                "displayed": len(results),
             }
         
         except Exception as e:
+            print(f"[DEBUG] Error in filter query: {str(e)}")
             return {
                 "query_type": "filter",
                 "message": f"❌ Error: {str(e)}",
@@ -475,27 +659,17 @@ class JewelrySalesBot:
     def _handle_summary_query(self, parsed_query: Dict) -> Dict[str, Any]:
         """Handle summary/aggregation queries"""
         filters = parsed_query["filters"]
-        group_by = parsed_query["summary_by"] or "product"
+        group_by = parsed_query.get("group_by") or "KODE_BARANG"
         confidence = parsed_query["confidence"]
-        
-        # Map summary_by to column name
-        group_by_map = {
-            "product": "KODE_BARANG",
-            "location": "LOKASI",
-            "month": "BULAN",
-            "year": "TAHUN",
-            "channel": "CHANNEL",
-            "classification": "KLASIFIKASI_BARANG",
-            "color": "WARNA_BARANG",
-            "size": "UKURAN_BARANG",
-        }
-        
-        group_column = group_by_map.get(group_by, "KODE_BARANG")
         
         try:
             # Build and execute query
-            sql, params = SalesQueryBuilder.build_summary_query(filters, group_column)
-            results = self.db.execute_query(sql, params)
+            sql, params = SalesQueryBuilder.build_summary_query(filters, group_by)
+            
+            print(f"[DEBUG] Summary SQL: {sql}")
+            print(f"[DEBUG] Group By: {group_by}")
+            
+            results = self.db.execute_query(sql, tuple(params))
             
             # Generate response message
             if results:
@@ -508,15 +682,19 @@ class JewelrySalesBot:
                     if total_records else 0
                 )
 
+                filter_desc = self._describe_filters(filters)
+                
                 message = (
                     f"📊 Ringkasan Penjualan\n\n"
-                    f"Berdasarkan data yang tersedia, ditemukan **{total_records} transaksi** "
-                    f"dengan total penjualan sebanyak **{total_qty} unit** "
-                    f"dan total berat mencapai **{total_berat:.2f} gram**.\n\n"
-                    f"Rata-rata berat per item berada di sekitar **{avg_berat:.2f} gram**.\n\n"
-                    f"📋 Berikut ringkasan data pendukung per kategori:\n"
+                    f"Berdasarkan {group_by.lower()}"
+                    f"{f' {filter_desc}' if filter_desc else ''}:\n\n"
+                    f"✓ Total transaksi: **{total_records:,}**\n"
+                    f"✓ Total quantity: **{total_qty:,} unit**\n"
+                    f"✓ Total berat: **{total_berat:,.2f} gram**\n"
+                    f"✓ Rata-rata berat: **{avg_berat:.2f} gram/item**\n\n"
+                    f"📋 Detail per {group_by.lower()}:\n"
                     f"{self._format_summary_table(results)}\n\n"
-                    f"🔍 Confidence: {confidence:.0%}"
+                    f"🎯 Tingkat kepercayaan: {confidence:.0%}"
                 )
 
             else:
@@ -534,6 +712,7 @@ class JewelrySalesBot:
             }
         
         except Exception as e:
+            print(f"[DEBUG] Error in summary query: {str(e)}")
             return {
                 "query_type": "summary",
                 "message": f"❌ Error executing summary: {str(e)}",

@@ -5,11 +5,12 @@ Jewelry Sales AI Chatbot with NLP and API endpoints
 """
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Optional
 from pathlib import Path
+from pydantic import BaseModel
 
 from app.sales_api import router as sales_router
 from app.chatbot import create_bot
@@ -44,12 +45,15 @@ def get_bot():
             raise HTTPException(status_code=500, detail=f"Failed to initialize chatbot: {str(e)}")
     return bot
 
-# Include API routers
-app.include_router(sales_router)
+# Include API routers - disabled for now
+# try:
+#     app.include_router(sales_router)
+# except Exception as e:
+#     print(f"Warning: Could not include sales_router: {e}")
 
 
-# Root endpoint
-@app.get("/")
+# Root endpoint - API info
+@app.get("/api/info")
 def read_root():
     """Root endpoint with API info"""
     return {
@@ -178,14 +182,14 @@ async def startup_event():
 
 # Mount static files
 STATIC_PATH = Path(__file__).resolve().parent / "static"
-app.mount("/ui", StaticFiles(directory=str(STATIC_PATH), html=True), name="ui")
 
-
-# Root redirect to UI
 @app.get("/")
 def root():
-    """Redirect to chat UI"""
-    return RedirectResponse(url="/ui/")
+    """Serve index.html"""
+    return FileResponse(str(STATIC_PATH / "index.html"))
+
+# Mount static files after root endpoint
+app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jewelry Sales Chatbot</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="chat-app">
+        <!-- Topbar -->
+        <header class="topbar">
+            <div class="topbar-content">
+                <h1 class="topbar-title">💎 Jewelry Sales AI</h1>
+                <p class="topbar-subtitle">Tanya penjualan perhiasan dengan bahasa alami</p>
+            </div>
+            <button class="btn-icon" id="btnNewChat" aria-label="New chat">
+                🔄
+            </button>
+        </header>
+
+        <!-- Chat Container -->
+        <main class="chat-container">
+            <div class="messages-wrapper" id="messagesWrapper">
+                <!-- Empty state akan di-inject via JS -->
+            </div>
+        </main>
+
+        <!-- Composer (Input) -->
+        <footer class="composer">
+            <div class="composer-content">
+                <textarea 
+                    id="inputMessage" 
+                    class="input-text"
+                    placeholder="Ketik pertanyaan Anda... (Enter untuk kirim, Shift+Enter untuk baris baru)"
+                    rows="1"
+                ></textarea>
+                <button class="btn-send" id="btnSend" aria-label="Send message">
+                    ➤
+                </button>
+            </div>
+            <div class="composer-hint">Enter = kirim • Shift+Enter = baris baru</div>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
