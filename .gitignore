@@ -1,0 +1,19 @@
+# Python / venv
+.venv/
+venv/
+projectubs/.venv/
+
+# Python cache
+__pycache__/
+projectubs/**/__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
