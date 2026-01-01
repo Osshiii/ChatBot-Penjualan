@@ -4,13 +4,14 @@ NLP Parser for Jewelry Sales Chatbot (Indonesian)
 - Detect intent (help / exploratory / detail / summary / count)
 - Extract filters: kode_barang, lokasi, klasifikasi_barang, warna_barang, ukuran_barang,
   channel, bulan, tahun, min/max berat
-- Robust to common typos (e.g., chennel/chenel -> channel) and decimal commas (7,5 -> 7.5)
+- Support relative time: "bulan ini", "bulan lalu", "tahun ini"
 """
 
 from __future__ import annotations
 
 import re
 from enum import Enum
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -41,31 +42,19 @@ _MONTH_MAP = {
     "desember": 12, "des": 12,
 }
 
-HELP_KEYWORDS = {
-    "bantuan", "help", "cara", "contoh", "panduan", "petunjuk"
-}
-
-# COUNT transaksi/rows, bukan "berapa channel"
+HELP_KEYWORDS = {"bantuan", "help", "cara", "contoh", "panduan", "petunjuk"}
 COUNT_HINTS = {"baris", "row", "rows", "transaksi", "record", "data", "jumlah transaksi"}
 
 EXPLORATORY_RULES = [
-    # unique/distinct values
-    (r"(nilai unik|unique|distinct).*(kolom|field)", "unique_values_all_columns"),
-
-    # availability / list
     (r"(kode barang|kode produk|produk)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_codes"),
     (r"(lokasi|store|toko)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_locations"),
 
-    # channel: support "ada berapa channel" / "berapa channel" / "channel apa saja"
     (r"(channel|chann?el|chennel|chenel|chanel)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_channels"),
     (r"(ada\s+)?berapa\s+(channel|chann?el|chennel|chenel|chanel)\b", "available_channels"),
-    (r"\b(channel|chann?el|chennel|chenel|chanel)\b.*\bberapa\b", "available_channels"),
 
-    # time coverage
     (r"(tahun)\s*(apa saja|yang ada|tersedia|rentang|range)", "year_range"),
     (r"(bulan)\s*(apa saja|yang ada|tersedia|rentang|range)", "month_range"),
 
-    # overview
     (r"(data apa saja|overview|gambaran data|ringkasan data)", "data_overview"),
 ]
 
@@ -77,18 +66,15 @@ def extract_api_params(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
 def _normalize_text(text: str) -> str:
     t = (text or "").strip().lower()
-    # common typos for channel
     t = re.sub(r"\bchennel\b", "channel", t)
     t = re.sub(r"\bchenel\b", "channel", t)
     t = re.sub(r"\bchanel\b", "channel", t)
     t = re.sub(r"\bchanell\b", "channel", t)
-    # normalize spacing
     t = re.sub(r"\s+", " ", t)
     return t
 
 
 def _has_any_code(text: str) -> bool:
-    # two letters + 6 digits (MP000197, LO000048, KD000016, PL000037, SZ000012)
     return re.search(r"\b[a-z]{2}\d{6}\b", text, flags=re.I) is not None
 
 
@@ -157,13 +143,6 @@ def _extract_codes(text: str) -> Dict[str, str]:
 
 
 def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
-    """
-    Support:
-    - "berat 5 sampai 10"
-    - "berat 5-10"
-    - "berat >= 5"
-    - "berat 7,5"  -> min=max=7.5
-    """
     t = text.lower()
 
     m = re.search(
@@ -189,8 +168,43 @@ def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     return None, None
 
 
+def _apply_relative_time(text: str) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Return (bulan, tahun) if detected from phrases like:
+    - "bulan ini", "bulan sekarang"
+    - "bulan lalu"
+    - "tahun ini"
+    """
+    now = datetime.now()
+    bulan = None
+    tahun = None
+
+    if re.search(r"\btahun\s+ini\b", text):
+        tahun = now.year
+
+    if re.search(r"\bbulan\s+(ini|sekarang)\b", text):
+        bulan = now.month
+        tahun = tahun or now.year
+
+    if re.search(r"\bbulan\s+lalu\b", text):
+        if now.month == 1:
+            bulan = 12
+            tahun = (tahun or now.year) - 1
+        else:
+            bulan = now.month - 1
+            tahun = tahun or now.year
+
+    return bulan, tahun
+
+
 def _extract_group_by(text: str) -> Optional[str]:
     t = text.lower()
+
+    # support "ringkasan lokasi" (tanpa kata "per")
+    if re.search(r"\bringkasan\s+lokasi\b", t):
+        return "LOKASI"
+    if re.search(r"\bringkasan\s+(produk|kode barang|kode produk)\b", t):
+        return "KODE_BARANG"
 
     if re.search(r"\b(per|berdasarkan)\s+lokasi\b", t):
         return "LOKASI"
@@ -224,13 +238,20 @@ class NLPParser:
         if ch is not None:
             filters["channel"] = ch
 
+        # month/year normal
         mo = _month_from_text(text)
-        if mo is not None:
-            filters["bulan"] = mo
-
         yr = _year_from_text(text)
-        if yr is not None:
-            filters["tahun"] = yr
+
+        # relative month/year
+        rel_mo, rel_yr = _apply_relative_time(text)
+
+        bulan = mo if mo is not None else rel_mo
+        tahun = yr if yr is not None else rel_yr
+
+        if bulan is not None:
+            filters["bulan"] = bulan
+        if tahun is not None:
+            filters["tahun"] = tahun
 
         wmin, wmax = _extract_weight_range(text)
         if wmin is not None:
@@ -271,14 +292,11 @@ class NLPParser:
         if any(k in text for k in ("ringkasan", "summary", "rekap", "agregat")):
             return QueryType.SUMMARY
 
-        # "berapa ..." can be COUNT transaksi OR exploratory
-        if "berapa" in text:
-            if any(h in text for h in COUNT_HINTS):
-                return QueryType.COUNT
-            if any(x in text for x in ("channel", "kode", "lokasi", "bulan", "tahun")):
-                return QueryType.EXPLORATORY
+        # count
+        if "berapa" in text and any(h in text for h in COUNT_HINTS):
+            return QueryType.COUNT
 
-        # filters/codes => detail
+        # If filters exist or user asks to show/list/search => detail
         if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display")):
             return QueryType.DETAIL
 
