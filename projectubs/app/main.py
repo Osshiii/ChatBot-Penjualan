@@ -4,6 +4,15 @@ FastAPI Main Application
 Jewelry Sales AI Chatbot with NLP and API endpoints
 """
 
+from dotenv import load_dotenv
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]  # .../projectubs
+load_dotenv(BASE_DIR / ".env")          # kalau .env kamu taruh di projectubs
+load_dotenv(BASE_DIR.parent / ".env")   # fallback kalau .env kamu taruh di root repo
+
+
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware

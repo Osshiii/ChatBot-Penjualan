@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Ollama LLM Client (Llama3)
-- No extra dependencies (uses urllib)
+Ollama LLM Client (urllib-based)
+- No extra dependencies
 - Safe fallback if Ollama is not running
 """
 
@@ -24,7 +24,7 @@ class OllamaClient:
         timeout: int = 25,
     ):
         self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.getenv("OLLAMA_MODEL", "llama3")
+        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1:latest")
         self.timeout = timeout
 
     def generate(
@@ -35,9 +35,6 @@ class OllamaClient:
         top_p: float = 0.9,
         max_tokens: int = 350,
     ) -> str:
-        """
-        Call Ollama /api/generate (non-stream).
-        """
         url = f"{self.base_url}/api/generate"
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -47,8 +44,7 @@ class OllamaClient:
             "options": {
                 "temperature": temperature,
                 "top_p": top_p,
-                # Ollama uses num_predict for output tokens
-                "num_predict": max_tokens,
+                "num_predict": max_tokens,  # ollama output tokens
             },
         }
 

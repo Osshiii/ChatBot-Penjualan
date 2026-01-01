@@ -1,357 +1,304 @@
 # -*- coding: utf-8 -*-
 """
-Natural Language Parser for Jewelry Sales Queries (REFACTORED)
-Implements comprehensive intent detection + filter extraction
+NLP Parser for Jewelry Sales Chatbot (Indonesian)
+- Detect intent (help / exploratory / detail / summary / count)
+- Extract filters: kode_barang, lokasi, klasifikasi_barang, warna_barang, ukuran_barang,
+  channel, bulan, tahun, min/max berat
+- Robust to common typos (e.g., chennel/chenel -> channel) and decimal commas (7,5 -> 7.5)
 """
 
-import re
-from typing import Dict, List, Optional, Tuple
-from enum import Enum
-from datetime import datetime
+from __future__ import annotations
 
-class QueryType(Enum):
-    """Query intent types"""
-    DETAIL = "detail"           # Row-level data with filters
-    COUNT = "count"             # Total count with filters
-    SUMMARY = "summary"         # Aggregation with GROUP BY
-    EXPLORATORY = "exploratory" # Distinct values, ranges
+import re
+from enum import Enum
+from typing import Any, Dict, Optional, Tuple
+
+
+class QueryType(str, Enum):
     HELP = "help"
+    EXPLORATORY = "exploratory"
+    SUMMARY = "summary"
+    DETAIL = "detail"
+    COUNT = "count"
     UNKNOWN = "unknown"
-    
-    # Backward compat
+
+    # backward compat alias (kalau ada code lama)
     FILTER = "detail"
 
+
+_MONTH_MAP = {
+    "januari": 1, "jan": 1,
+    "februari": 2, "feb": 2,
+    "maret": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "mei": 5,
+    "juni": 6, "jun": 6,
+    "juli": 7, "jul": 7,
+    "agustus": 8, "agu": 8, "ags": 8,
+    "september": 9, "sep": 9,
+    "oktober": 10, "okt": 10,
+    "november": 11, "nov": 11,
+    "desember": 12, "des": 12,
+}
+
+HELP_KEYWORDS = {
+    "bantuan", "help", "cara", "contoh", "panduan", "petunjuk"
+}
+
+# COUNT transaksi/rows, bukan "berapa channel"
+COUNT_HINTS = {"baris", "row", "rows", "transaksi", "record", "data", "jumlah transaksi"}
+
+EXPLORATORY_RULES = [
+    # unique/distinct values
+    (r"(nilai unik|unique|distinct).*(kolom|field)", "unique_values_all_columns"),
+
+    # availability / list
+    (r"(kode barang|kode produk|produk)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_codes"),
+    (r"(lokasi|store|toko)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_locations"),
+
+    # channel: support "ada berapa channel" / "berapa channel" / "channel apa saja"
+    (r"(channel|chann?el|chennel|chenel|chanel)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_channels"),
+    (r"(ada\s+)?berapa\s+(channel|chann?el|chennel|chenel|chanel)\b", "available_channels"),
+    (r"\b(channel|chann?el|chennel|chenel|chanel)\b.*\bberapa\b", "available_channels"),
+
+    # time coverage
+    (r"(tahun)\s*(apa saja|yang ada|tersedia|rentang|range)", "year_range"),
+    (r"(bulan)\s*(apa saja|yang ada|tersedia|rentang|range)", "month_range"),
+
+    # overview
+    (r"(data apa saja|overview|gambaran data|ringkasan data)", "data_overview"),
+]
+
+
+def extract_api_params(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Backward-compat helper."""
+    return parsed.get("filters", {}) or {}
+
+
+def _normalize_text(text: str) -> str:
+    t = (text or "").strip().lower()
+    # common typos for channel
+    t = re.sub(r"\bchennel\b", "channel", t)
+    t = re.sub(r"\bchenel\b", "channel", t)
+    t = re.sub(r"\bchanel\b", "channel", t)
+    t = re.sub(r"\bchanell\b", "channel", t)
+    # normalize spacing
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+
+def _has_any_code(text: str) -> bool:
+    # two letters + 6 digits (MP000197, LO000048, KD000016, PL000037, SZ000012)
+    return re.search(r"\b[a-z]{2}\d{6}\b", text, flags=re.I) is not None
+
+
+def _parse_float(num_str: str) -> Optional[float]:
+    if num_str is None:
+        return None
+    s = num_str.strip().replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _month_from_text(text: str) -> Optional[int]:
+    # bulan 4 / bulan ke 4
+    m = re.search(r"\bbulan(?:\s+ke)?\s*(\d{1,2})\b", text, flags=re.I)
+    if m:
+        try:
+            v = int(m.group(1))
+            if 1 <= v <= 12:
+                return v
+        except Exception:
+            pass
+
+    # month name
+    for name, num in _MONTH_MAP.items():
+        if re.search(rf"\b{name}\b", text, flags=re.I):
+            return num
+    return None
+
+
+def _year_from_text(text: str) -> Optional[int]:
+    m = re.search(r"\b(19\d{2}|20\d{2})\b", text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_channel(text: str) -> Optional[int]:
+    m = re.search(r"\bchannel\s*(\d{1,3})\b", text, flags=re.I)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_codes(text: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    patterns = {
+        "kode_barang": r"\bMP\d{6}\b",
+        "lokasi": r"\bLO\d{6}\b",
+        "klasifikasi_barang": r"\bKD\d{6}\b",
+        "warna_barang": r"\bPL\d{6}\b",
+        "ukuran_barang": r"\bSZ\d{6}\b",
+    }
+    for key, pat in patterns.items():
+        m = re.search(pat, text, flags=re.I)
+        if m:
+            out[key] = m.group(0).upper()
+    return out
+
+
+def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Support:
+    - "berat 5 sampai 10"
+    - "berat 5-10"
+    - "berat >= 5"
+    - "berat 7,5"  -> min=max=7.5
+    """
+    t = text.lower()
+
+    m = re.search(
+        r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:-|sampai|sd|s/d|hingga|to)\s*([0-9]+(?:[.,][0-9]+)?)\b",
+        t
+    )
+    if m:
+        return _parse_float(m.group(1)), _parse_float(m.group(2))
+
+    m = re.search(r"\bberat(?:\s+satuan)?\s*(>=|=>|lebih dari|minimal|min)\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    if m:
+        return _parse_float(m.group(2)), None
+
+    m = re.search(r"\bberat(?:\s+satuan)?\s*(<=|=<|kurang dari|maksimal|max)\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    if m:
+        return None, _parse_float(m.group(2))
+
+    m = re.search(r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    if m:
+        v = _parse_float(m.group(1))
+        return v, v
+
+    return None, None
+
+
+def _extract_group_by(text: str) -> Optional[str]:
+    t = text.lower()
+
+    if re.search(r"\b(per|berdasarkan)\s+lokasi\b", t):
+        return "LOKASI"
+    if re.search(r"\b(per|berdasarkan)\s+(produk|kode barang|kode produk)\b", t):
+        return "KODE_BARANG"
+    if re.search(r"\b(per|berdasarkan)\s+bulan\b", t):
+        return "BULAN"
+    if re.search(r"\b(per|berdasarkan)\s+tahun\b", t):
+        return "TAHUN"
+    if re.search(r"\b(per|berdasarkan)\s+channel\b", t):
+        return "CHANNEL"
+    if re.search(r"\b(per|berdasarkan)\s+warna\b", t):
+        return "WARNA_BARANG"
+    if re.search(r"\b(per|berdasarkan)\s+ukuran\b", t):
+        return "UKURAN_BARANG"
+    if re.search(r"\b(per|berdasarkan)\s+klasifikasi\b", t):
+        return "KLASIFIKASI_BARANG"
+
+    return None
+
+
 class NLPParser:
-    """
-    Complete NLP parser with intent detection and filter extraction
-    """
-    
-    # Month mapping
-    MONTH_KEYWORDS = {
-        "januari": 1, "februari": 2, "maret": 3, "april": 4,
-        "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
-        "september": 9, "oktober": 10, "november": 11, "desember": 12,
-        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "mei": 5,
-        "jun": 6, "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "des": 12,
-    }
-    
-    # Intent keywords (priority order)
-    HELP_KEYWORDS = ["bantuan", "help", "apa itu", "bagaimana", "cara"]
-    
-    COUNT_KEYWORDS = ["berapa", "jumlah", "total", "ada berapa"]
-    
-    SUMMARY_KEYWORDS = ["ringkasan", "summary", "per", "berdasarkan", "aggregat", "statistik"]
-    
-    EXPLORATORY_KEYWORDS = ["apa saja", "data apa", "dari tahun", "sampai tahun", "range", "ada berapa"]
-    
-    DETAIL_KEYWORDS = ["tampilkan", "lihat", "cari", "filter", "show", "find", "dengan"]
-    
-    # GROUP BY mapping (for summary queries)
-    GROUP_BY_MAP = {
-        "kode": "KODE_BARANG",
-        "produk": "KODE_BARANG",
-        "code": "KODE_BARANG",
-        "lokasi": "LOKASI",
-        "location": "LOKASI",
-        "bulan": "BULAN",
-        "month": "BULAN",
-        "tahun": "TAHUN",
-        "year": "TAHUN",
-        "channel": "CHANNEL",
-        "klasifikasi": "KLASIFIKASI_BARANG",
-        "warna": "WARNA_BARANG",
-        "color": "WARNA_BARANG",
-        "ukuran": "UKURAN_BARANG",
-        "size": "UKURAN_BARANG",
-    }
-    
-    def __init__(self):
-        """Initialize parser"""
-        pass
-    
-    def parse(self, user_input: str) -> Dict:
-        """
-        Main parse method
-        Returns: {query_type, filters, group_by, confidence, error}
-        """
-        input_lower = user_input.lower().strip()
-        
-        # Step 1: Detect intent
-        query_type = self._detect_intent(input_lower)
-        
-        # Step 2: Extract all filters
-        filters = self._extract_all_filters(input_lower)
-        
-        # Step 3: Validate filters
-        is_valid, error_msg = self._validate_filters(filters)
-        if not is_valid:
-            return {
-                "query_type": QueryType.UNKNOWN,
-                "filters": {},
-                "group_by": None,
-                "confidence": 0.0,
-                "error": error_msg,
-                "original_input": user_input,
-            }
-        
-        # Step 4: Extract GROUP BY (if summary)
-        group_by = None
-        if query_type == QueryType.SUMMARY:
-            group_by = self._extract_group_by(input_lower)
-        
-        # Step 5: Calculate confidence
-        confidence = self._calculate_confidence(query_type, filters, group_by)
-        
+    def parse(self, user_message: str) -> Dict[str, Any]:
+        raw = user_message or ""
+        text = _normalize_text(raw)
+
+        filters: Dict[str, Any] = {}
+        filters.update(_extract_codes(text))
+
+        ch = _extract_channel(text)
+        if ch is not None:
+            filters["channel"] = ch
+
+        mo = _month_from_text(text)
+        if mo is not None:
+            filters["bulan"] = mo
+
+        yr = _year_from_text(text)
+        if yr is not None:
+            filters["tahun"] = yr
+
+        wmin, wmax = _extract_weight_range(text)
+        if wmin is not None:
+            filters["min_berat"] = wmin
+        if wmax is not None:
+            filters["max_berat"] = wmax
+
+        exploratory_intent = self._detect_exploratory_intent(text)
+        query_type = self._detect_query_type(text, filters, exploratory_intent)
+        group_by = _extract_group_by(text)
+        confidence = self._estimate_confidence(query_type, filters, text)
+
         return {
             "query_type": query_type,
             "filters": filters,
             "group_by": group_by,
+            "exploratory_intent": exploratory_intent,
             "confidence": confidence,
-            "error": None,
-            "original_input": user_input,
+            "original": raw,
+            "normalized": text,
         }
-    
-    # ==================== INTENT DETECTION ====================
-    
-    def _detect_intent(self, input_lower: str) -> QueryType:
-        """
-        Detect query intent with priority:
-        HELP > COUNT > SUMMARY > DETAIL > EXPLORATORY > UNKNOWN
-        """
-        
-        # HELP
-        if any(kw in input_lower for kw in self.HELP_KEYWORDS):
+
+    def _detect_exploratory_intent(self, text: str) -> Dict[str, Any]:
+        for pat, ask_about in EXPLORATORY_RULES:
+            if re.search(pat, text, flags=re.I):
+                return {"ask_about": ask_about}
+        return {}
+
+    def _detect_query_type(self, text: str, filters: Dict[str, Any], exploratory_intent: Dict[str, Any]) -> QueryType:
+        if any(k in text for k in HELP_KEYWORDS):
             return QueryType.HELP
-        
-        # COUNT - "berapa" + filter context
-        if any(kw in input_lower for kw in self.COUNT_KEYWORDS):
-            if self._has_filter_indicators(input_lower):
-                return QueryType.COUNT
-        
-        # SUMMARY - "ringkasan", "per", "berdasarkan"
-        if any(kw in input_lower for kw in self.SUMMARY_KEYWORDS):
-            return QueryType.SUMMARY
-        
-        # EXPLORATORY - "apa saja", "dari tahun", "range"
-        if any(kw in input_lower for kw in self.EXPLORATORY_KEYWORDS):
+
+        ask_about = (exploratory_intent or {}).get("ask_about")
+        if ask_about:
             return QueryType.EXPLORATORY
-        
-        # DETAIL - "tampilkan", "cari", filter keyword + codes/numerics
-        if any(kw in input_lower for kw in self.DETAIL_KEYWORDS):
+
+        # explicit summary keywords
+        if any(k in text for k in ("ringkasan", "summary", "rekap", "agregat")):
+            return QueryType.SUMMARY
+
+        # "berapa ..." can be COUNT transaksi OR exploratory
+        if "berapa" in text:
+            if any(h in text for h in COUNT_HINTS):
+                return QueryType.COUNT
+            if any(x in text for x in ("channel", "kode", "lokasi", "bulan", "tahun")):
+                return QueryType.EXPLORATORY
+
+        # filters/codes => detail
+        if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display")):
             return QueryType.DETAIL
-        
-        # DETAIL - Implicit: has code patterns or numeric filters
-        if self._has_code_patterns(input_lower) or self._has_numeric_filters(input_lower):
-            return QueryType.DETAIL
-        
+
+        # "per ..." without explicit summary word often implies summary
+        if "per " in text or "berdasarkan" in text:
+            return QueryType.SUMMARY
+
         return QueryType.UNKNOWN
-    
-    def _has_filter_indicators(self, input_lower: str) -> bool:
-        """Check if input has any filter indicators"""
-        return (
-            self._has_code_patterns(input_lower) or
-            self._has_temporal_patterns(input_lower) or
-            self._has_numeric_filters(input_lower)
-        )
-    
-    def _has_code_patterns(self, input_lower: str) -> bool:
-        """Check for code patterns (MP/LO/KD/PL/SZ + 6 digits)"""
-        return bool(re.search(r'[a-z]{2}\d{6}', input_lower, re.IGNORECASE))
-    
-    def _has_temporal_patterns(self, input_lower: str) -> bool:
-        """Check for year/month/date patterns"""
-        return bool(re.search(r'(tahun|bulan|month|20\d{2}|\d{4}-\d{2}-\d{2})', input_lower))
-    
-    def _has_numeric_filters(self, input_lower: str) -> bool:
-        """Check for numeric filters (berat, jumlah, channel)"""
-        return bool(re.search(r'(berat|jumlah|quantity|channel)', input_lower))
-    
-    # ==================== FILTER EXTRACTION ====================
-    
-    def _extract_all_filters(self, input_lower: str) -> Dict:
-        """
-        Extract all filters from input
-        Returns dict with: kode_barang, lokasi, klasifikasi_barang, warna_barang, 
-                         ukuran_barang, bulan, tahun, date_from, date_to,
-                         min_berat, max_berat, min_jumlah, max_jumlah, channel
-        """
-        filters = {}
-        
-        # Extract codes (case-insensitive, normalize uppercase)
-        self._extract_codes(input_lower, filters)
-        
-        # Extract temporal filters
-        self._extract_temporal(input_lower, filters)
-        
-        # Extract numeric filters
-        self._extract_numeric(input_lower, filters)
-        
-        return filters
-    
-    def _extract_codes(self, input_lower: str, filters: Dict) -> None:
-        """Extract code patterns"""
-        code_patterns = [
-            (r'(?i)\bmp(\d{6})\b', 'kode_barang'),
-            (r'(?i)\blo(\d{6})\b', 'lokasi'),
-            (r'(?i)\bkd(\d{6})\b', 'klasifikasi_barang'),
-            (r'(?i)\bpl(\d{6})\b', 'warna_barang'),
-            (r'(?i)\bsz(\d{6})\b', 'ukuran_barang'),
-        ]
-        
-        for pattern, field in code_patterns:
-            match = re.search(pattern, input_lower)
-            if match:
-                filters[field] = match.group(0).upper()  # Entire match, uppercase
-    
-    def _extract_temporal(self, input_lower: str, filters: Dict) -> None:
-        """Extract date/month/year filters"""
-        
-        # Single date: YYYY-MM-DD
-        date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', input_lower)
-        if date_match:
-            filters['date_from'] = date_match.group(0)
-            # If only one date, also set as "to" for single-day queries
-            filters['date_to'] = date_match.group(0)
-        
-        # Date range: "dari 2022-01-01 sampai 2022-12-31"
-        range_match = re.search(
-            r'(?:dari|from)?\s*(\d{4}-\d{2}-\d{2})\s+(?:sampai|hingga|s\.d|to)\s+(\d{4}-\d{2}-\d{2})',
-            input_lower
-        )
-        if range_match:
-            filters['date_from'] = range_match.group(1)
-            filters['date_to'] = range_match.group(2)
-        
-        # Year: "tahun 2022"
-        year_match = re.search(r'(?:tahun|year)\s+(20\d{2})', input_lower)
-        if year_match:
-            filters['tahun'] = int(year_match.group(1))
-        
-        # Month by number: "bulan 4"
-        month_num_match = re.search(r'(?:bulan|month)\s+([1-9]|1[0-2])', input_lower)
-        if month_num_match:
-            filters['bulan'] = int(month_num_match.group(1))
-        else:
-            # Month by name
-            for month_name, month_num in self.MONTH_KEYWORDS.items():
-                if re.search(rf'\b{month_name}\b', input_lower):
-                    filters['bulan'] = month_num
-                    break
-    
-    def _extract_numeric(self, input_lower: str, filters: Dict) -> None:
-        """Extract numeric range filters (berat, jumlah)"""
-        
-        # Pattern: "5-10" or "5 sampai 10"
-        range_pattern = r'(\d+(?:\.\d+)?)\s*(?:-|sampai|hingga|to|s\.d)\s*(\d+(?:\.\d+)?)'
-        
-        # BERAT filters
-        if 'berat' in input_lower:
-            # Range: "berat 5-10"
-            match = re.search(rf'berat\s+{range_pattern}', input_lower)
-            if match:
-                filters['min_berat'] = float(match.group(1))
-                filters['max_berat'] = float(match.group(2))
-            else:
-                # Min: "berat minimal 5"
-                min_match = re.search(r'berat\s+(?:minimal|min)\s+(\d+(?:\.\d+)?)', input_lower)
-                if min_match:
-                    filters['min_berat'] = float(min_match.group(1))
-                
-                # Max: "berat maksimal 10"
-                max_match = re.search(r'berat\s+(?:maksimal|max)\s+(\d+(?:\.\d+)?)', input_lower)
-                if max_match:
-                    filters['max_berat'] = float(max_match.group(1))
-        
-        # JUMLAH filters
-        if 'jumlah' in input_lower:
-            match = re.search(rf'jumlah\s+{range_pattern}', input_lower)
-            if match:
-                filters['min_jumlah'] = float(match.group(1))
-                filters['max_jumlah'] = float(match.group(2))
-        
-        # CHANNEL
-        channel_match = re.search(r'channel\s+(\d+)', input_lower)
-        if channel_match:
-            filters['channel'] = int(channel_match.group(1))
-    
-    def _extract_group_by(self, input_lower: str) -> Optional[str]:
-        """Extract GROUP BY field for summary queries"""
-        for keyword, sql_field in self.GROUP_BY_MAP.items():
-            if keyword in input_lower:
-                return sql_field
-        return "KODE_BARANG"  # Default
-    
-    # ==================== VALIDATION ====================
-    
-    def _validate_filters(self, filters: Dict) -> Tuple[bool, Optional[str]]:
-        """Validate extracted filters"""
-        
-        # Bulan validation
-        if 'bulan' in filters:
-            if not (1 <= filters['bulan'] <= 12):
-                return False, "Bulan harus 1-12"
-        
-        # Tahun validation
-        if 'tahun' in filters:
-            if not (2000 <= filters['tahun'] <= 2099):
-                return False, "Tahun tidak valid (2000-2099)"
-        
-        # Date range validation
-        if 'date_from' in filters and 'date_to' in filters:
-            if filters['date_from'] > filters['date_to']:
-                return False, "Tanggal awal tidak boleh lebih besar dari akhir"
-        
-        # Weight range validation
-        if 'min_berat' in filters and 'max_berat' in filters:
-            if filters['min_berat'] > filters['max_berat']:
-                return False, "Berat minimal tidak boleh > maksimal"
-        
-        # Jumlah range validation
-        if 'min_jumlah' in filters and 'max_jumlah' in filters:
-            if filters['min_jumlah'] > filters['max_jumlah']:
-                return False, "Jumlah minimal tidak boleh > maksimal"
-        
-        return True, None
-    
-    # ==================== CONFIDENCE ====================
-    
-    def _calculate_confidence(self, query_type: QueryType, filters: Dict, group_by: Optional[str]) -> float:
-        """Calculate confidence score (0-1)"""
-        confidence = 0.5
-        
-        # Intent clarity bonus
-        if query_type in [QueryType.SUMMARY, QueryType.COUNT]:
-            confidence += 0.25
-        elif query_type == QueryType.DETAIL:
-            confidence += 0.20
-        elif query_type == QueryType.EXPLORATORY:
-            confidence += 0.15
-        elif query_type == QueryType.UNKNOWN:
-            return 0.1
-        
-        # Filter count bonus
-        num_filters = len(filters)
-        if num_filters >= 3:
-            confidence += 0.25
-        elif num_filters == 2:
-            confidence += 0.15
-        elif num_filters == 1:
-            confidence += 0.05
-        
-        # Code filter bonus (more specific)
-        has_code = any(k in filters for k in ['kode_barang', 'lokasi'])
-        if has_code:
-            confidence += 0.10
-        
-        # Temporal filter bonus
-        has_temporal = any(k in filters for k in ['tahun', 'bulan', 'date_from', 'date_to'])
-        if has_temporal:
-            confidence += 0.10
-        
-        return min(0.99, confidence)
 
-# ==================== UTILITY FUNCTIONS ====================
-
-def extract_api_params(parsed_query: Dict) -> Dict:
-    """Convert parsed query to API parameters"""
-    return parsed_query.get('filters', {})
+    def _estimate_confidence(self, qtype: QueryType, filters: Dict[str, Any], text: str) -> float:
+        if qtype == QueryType.HELP:
+            return 0.95
+        if qtype == QueryType.EXPLORATORY:
+            return 0.85
+        if qtype == QueryType.SUMMARY:
+            return 0.85 if ("ringkasan" in text or "summary" in text) else 0.7
+        if qtype == QueryType.COUNT:
+            return 0.8
+        if qtype == QueryType.DETAIL:
+            base = 0.65
+            bonus = min(0.35, 0.08 * len(filters))
+            return round(base + bonus, 3)
+        return 0.35
