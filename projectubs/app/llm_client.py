@@ -21,10 +21,15 @@ class OllamaClient:
         self,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: int = 25,
+        timeout: Optional[int] = None,
     ):
         self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1:latest")
+        self.model = (model or os.getenv("OLLAMA_MODEL", "llama3.1:latest")).strip()
+
+        if timeout is None:
+            # default 120s biar aman di CPU
+            timeout = int(os.getenv("OLLAMA_TIMEOUT", "120"))
+
         self.timeout = timeout
 
     def generate(

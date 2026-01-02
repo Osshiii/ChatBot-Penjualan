@@ -12,10 +12,9 @@
         <header class="topbar">
             <div class="topbar-content">
                 <h1 class="topbar-title">💎 Jewelry Sales AI</h1>
-                <p class="topbar-subtitle">Tanya penjualan perhiasan dengan bahasa alami</p>
             </div>
             <button class="btn-icon" id="btnNewChat" aria-label="New chat" onclick="handleNewChat()">
-                🔄
+                New Chat
             </button>
         </header>
 
@@ -32,7 +31,7 @@
                 <textarea 
                     id="inputMessage" 
                     class="input-text"
-                    placeholder="Ketik pertanyaan Anda... (Enter untuk kirim, Shift+Enter untuk baris baru)"
+                    placeholder="Ketik pertanyaan Anda..."
                     rows="1"
                 ></textarea>
                 <button class="btn-send" id="btnSend" aria-label="Send message" onclick="handleSend()">
@@ -42,12 +41,14 @@
             <div class="composer-hint">Enter = kirim • Shift+Enter = baris baru</div>
         </footer>
     </div>
+    <div id="answer"></div>
+    <div id="table-wrap"></div>
 
     <script src="/static/app.js"></script>
 </body>
 </html>
               <button class="card" data-starter="Ringkasan penjualan per lokasi">
-                <div class="card-title">Ringkasan per lokasi</div>
+                <div class="card-title">Data per produk</div>
                 <div class="card-sub">Lokasi mana paling tinggi?</div>
               </button>
               <button class="card" data-starter="Tampilkan penjualan MP000197 bulan 4 tahun 2022">
@@ -82,5 +83,6 @@
   </div>
 
   <script src="/static/app.js"></script>
+</script>
 </body>
 </html>

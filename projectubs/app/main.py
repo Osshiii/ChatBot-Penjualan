@@ -11,8 +11,6 @@ BASE_DIR = Path(__file__).resolve().parents[1]  # .../projectubs
 load_dotenv(BASE_DIR / ".env")          # kalau .env kamu taruh di projectubs
 load_dotenv(BASE_DIR.parent / ".env")   # fallback kalau .env kamu taruh di root repo
 
-
-
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,33 +79,31 @@ def read_root():
 
 
 @app.get("/chat")
-def chat(query: str = Query(..., description="Natural language query")):
+def chat(
+    query: str = Query(..., description="Natural language query"),
+    limit: int = Query(10, ge=1, le=50, description="Rows to show (detail only)"),
+    offset: int = Query(0, ge=0, description="Pagination offset (detail only)"),
+):
     """
     Chat endpoint: Process natural language queries using NLP and return results.
-    
-    Examples:
-    - "Tampilkan penjualan MP000197 bulan 4 tahun 2022"
-    - "Ringkasan penjualan per lokasi"
-    - "Berapa penjualan dengan berat 5 sampai 10?"
-    
-    Args:
-        query: Natural language question/command in Indonesian
-        
-    Returns:
-        JSON response with parsed query, results, and explanation
+    Adds limit/offset for detail queries, and returns a frontend-friendly JSON.
     """
     try:
         bot_instance = get_bot()
-        response = bot_instance.process_message(query)
-        
+
+        query_with_paging = f"{query} limit {limit} offset {offset}"
+        result = bot_instance.process_message(query_with_paging)
+
+        result.setdefault("limit", limit)
+        result.setdefault("offset", offset)
+
         return {
             "status": "success",
             "query": query,
-            "response": response,
+            **result,   # <-- flatten here
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
-
 
 @app.get("/help")
 def help_endpoint():
