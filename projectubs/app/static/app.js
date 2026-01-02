@@ -9,6 +9,7 @@ console.log('Elements:', { messagesWrapper, inputMessage, btnSend, btnNewChat })
 
 // State
 let isLoading = false;
+let lastQueryRequestedAnalysis = false;
 
 // Initialize immediately
 function initApp() {
@@ -58,14 +59,27 @@ function showEmptyState() {
 }
 
 // Add message to chat
-function addMessage(text, role) {
-    console.log('addMessage:', { text, role });
+function addMessage(text, role, data = null, totalCount = null) {
+    console.log('addMessage:', { text, role, data });
     const messageEl = document.createElement('div');
     messageEl.className = `message ${role}`;
     
     const bubbleEl = document.createElement('div');
     bubbleEl.className = `bubble ${role}`;
-    bubbleEl.textContent = text;
+    
+    if (role === 'assistant') {
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.textContent = text;
+        bubbleEl.appendChild(textDiv);
+        
+        if (data && data.length > 0) {
+            const tableEl = buildTable(data, totalCount);
+            bubbleEl.appendChild(tableEl);
+        }
+    } else {
+        bubbleEl.textContent = text;
+    }
     
     messageEl.appendChild(bubbleEl);
     messagesWrapper.appendChild(messageEl);
@@ -74,6 +88,72 @@ function addMessage(text, role) {
     setTimeout(() => {
         messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
     }, 0);
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Build table DOM element for data
+function buildTable(rows, totalCount) {
+    if (!rows || rows.length === 0) return null;
+
+    const cols = Object.keys(rows[0]);
+    
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-scroll';
+    
+    const table = document.createElement('table');
+    table.className = 'data-table';
+    
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    cols.forEach(c => {
+        const th = document.createElement('th');
+        th.textContent = c;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+        const row = document.createElement('tr');
+        cols.forEach(c => {
+            const td = document.createElement('td');
+            td.textContent = r[c] ?? '';
+            row.appendChild(td);
+        });
+        tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    
+    wrapper.appendChild(table);
+    if (typeof totalCount === "number" && totalCount > rows.length) {
+        const more = totalCount - rows.length;
+        const note = document.createElement("div");
+        note.className = "table-more";
+        note.textContent = `and ${more.toLocaleString()} more…`;
+        wrapper.appendChild(note);
+    }
+    return wrapper;
+}
+
+function getPayload(data) {
+    return data?.response ?? data;
+}
+
+// Check if user asked for analysis
+function userAskedForAnalysis(message) {
+    const msg = message.toLowerCase();
+    const keywords = [
+        "ringkasan", "insight", "analisis", "saran", "rekomendasi",
+        "kesimpulan", "jelaskan", "kenapa", "bandingkan"
+    ];
+    return keywords.some(kw => msg.includes(kw));
 }
 
 // Send message
@@ -86,6 +166,8 @@ async function handleSend() {
         console.log('Aborting: no text or loading');
         return;
     }
+    
+    lastQueryRequestedAnalysis = userAskedForAnalysis(text);
     
     isLoading = true;
     btnSend.disabled = true;
@@ -116,23 +198,36 @@ async function handleSend() {
         
         const data = await response.json();
         console.log('Response data:', data);
-        
+
+        const payload = getPayload(data);
+
         let replyText = 'Maaf, tidak ada respons dari server.';
-        
-        // Handle berbagai format response
-        if (data.response) {
-            if (typeof data.response === 'string') {
-                replyText = data.response;
-            } else if (data.response.message) {
-                replyText = data.response.message;
-            } else if (typeof data.response === 'object') {
-                // Jika response adalah object tapi bukan message, stringify
-                replyText = JSON.stringify(data.response, null, 2);
-            }
+
+        if (typeof payload === 'string') {
+            replyText = payload;
+        } else if (payload?.message) {
+            replyText = payload.message;
+        } else if (payload && typeof payload === 'object') {
+            replyText = JSON.stringify(payload, null, 2);
         }
-        
+
         console.log('Adding bot message:', replyText);
-        addMessage(replyText, 'assistant');
+        
+        // Determine if we should show table
+        const shouldShowTable = 
+            payload?.data && 
+            payload.data.length > 0 && 
+            !lastQueryRequestedAnalysis;
+        
+        const totalCount = payload?.count ?? payload?.total_records ?? null;
+        
+        addMessage(
+            replyText,
+            'assistant',
+            shouldShowTable ? payload.data : null,
+            totalCount
+        );
+
     } catch (error) {
         console.error('Error:', error);
         addMessage(`❌ Error: ${error.message}`, 'assistant');
@@ -163,6 +258,7 @@ function handleNewChat() {
     inputMessage.value = '';
     isLoading = false;
     btnSend.disabled = false;
+    lastQueryRequestedAnalysis = false;
     showEmptyState();
     inputMessage.focus();
 }

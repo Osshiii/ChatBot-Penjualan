@@ -145,22 +145,32 @@ def _extract_codes(text: str) -> Dict[str, str]:
 def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     t = text.lower()
 
+    # Range: "berat 5 sampai 10" or "berat 5-10"
     m = re.search(
-        r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:-|sampai|sd|s/d|hingga|to)\s*([0-9]+(?:[.,][0-9]+)?)\b",
+        r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:-|sampai|sd|s/d|hingga|to)\s*([0-9]+(?:[.,][0-9]+)?)",
         t
     )
     if m:
         return _parse_float(m.group(1)), _parse_float(m.group(2))
 
-    m = re.search(r"\bberat(?:\s+satuan)?\s*(>=|=>|lebih dari|minimal|min)\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    # Greater than / above: "berat di atas X", "berat lebih dari X", "berat > X", "berat >= X"
+    m = re.search(
+        r"\bberat(?:\s+satuan)?\s*(?:di\s+atas|lebih dari|>=|>)\s*([0-9]+(?:[.,][0-9]+)?)",
+        t
+    )
     if m:
-        return _parse_float(m.group(2)), None
+        return _parse_float(m.group(1)), None
 
-    m = re.search(r"\bberat(?:\s+satuan)?\s*(<=|=<|kurang dari|maksimal|max)\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    # Less than / below: "berat di bawah X", "berat kurang dari X", "berat < X", "berat <= X"
+    m = re.search(
+        r"\bberat(?:\s+satuan)?\s*(?:di\s+bawah|kurang dari|<=|<)\s*([0-9]+(?:[.,][0-9]+)?)",
+        t
+    )
     if m:
-        return None, _parse_float(m.group(2))
+        return None, _parse_float(m.group(1))
 
-    m = re.search(r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\b", t)
+    # Single value (exact match or range)
+    m = re.search(r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)", t)
     if m:
         v = _parse_float(m.group(1))
         return v, v
@@ -195,6 +205,17 @@ def _apply_relative_time(text: str) -> Tuple[Optional[int], Optional[int]]:
             tahun = tahun or now.year
 
     return bulan, tahun
+
+
+def _extract_limit(text: str) -> Optional[int]:
+    """Extract limit from queries like '10 baris', 'tampilkan 10 data', '5 penjualan', etc."""
+    m = re.search(r"(\d{1,3})\s*(?:baris|data|row|rows|transaksi|record|penjualan)", text, flags=re.I)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            pass
+    return None
 
 
 def _extract_group_by(text: str) -> Optional[str]:
@@ -259,6 +280,11 @@ class NLPParser:
         if wmax is not None:
             filters["max_berat"] = wmax
 
+        # Extract limit for "terbaru", "10 baris", etc.
+        limit = _extract_limit(text)
+        if limit is not None:
+            filters["limit"] = limit
+
         exploratory_intent = self._detect_exploratory_intent(text)
         query_type = self._detect_query_type(text, filters, exploratory_intent)
         group_by = _extract_group_by(text)
@@ -297,7 +323,7 @@ class NLPParser:
             return QueryType.COUNT
 
         # If filters exist or user asks to show/list/search => detail
-        if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display")):
+        if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display", "terbaru", "latest")):
             return QueryType.DETAIL
 
         # "per ..." without explicit summary word often implies summary

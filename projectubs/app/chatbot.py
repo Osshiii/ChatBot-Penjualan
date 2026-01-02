@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +24,14 @@ try:
 except Exception:
     generate_llm_answer = None
     LLMUnavailable = Exception
+
+logger = logging.getLogger(__name__)
+
+def env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 # ============================================================
@@ -56,6 +65,14 @@ class SalesDatabase:
             return None
         return res[0].get("max_tanggal")
 
+    def get_min_date(self) -> Optional[str]:
+        """Return min date string from DB (TANGGAL)."""
+        sql = "SELECT MIN(TANGGAL) as min_tanggal FROM penjualan"
+        res = self.execute_query(sql)
+        if not res:
+            return None
+        return res[0].get("min_tanggal")
+
     def get_latest_month_year(self) -> Tuple[int, int]:
         """
         Determine "latest month/year" based on MAX(TANGGAL) in DB,
@@ -84,6 +101,24 @@ class SalesDatabase:
 
         now = datetime.now()
         return now.month, now.year
+
+    def get_db_date_range(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """Return min and max dates from DB."""
+        min_tgl = self.get_min_date()
+        max_tgl = self.get_latest_date()
+        
+        def parse_date(s: str) -> Optional[datetime]:
+            if not s:
+                return None
+            s = str(s).strip().split(" ")[0]
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+            return None
+        
+        return parse_date(min_tgl), parse_date(max_tgl)
 
 
 # ============================================================
@@ -215,8 +250,7 @@ class JewelrySalesBot:
         self.parser = NLPParser()
         self.db = SalesDatabase(db_path)
         self.conversation_history: List[Dict[str, Any]] = []
-        self.debug = os.getenv("DEBUG", "0") == "1"
-        self.use_llm = os.getenv("USE_LLM", "0") == "1"
+        self.debug = env_bool("DEBUG", False)
 
     # -------------------------
     # Main entry
@@ -239,7 +273,7 @@ class JewelrySalesBot:
             }
 
         # Resolve relative time phrases based on DB (fix "bulan ini" jadi 2026 dll)
-        self._resolve_relative_time(parsed_query)
+        self._resolve_relative_time(parsed_query, user_message)
 
         if self.debug:
             print(f"[DEBUG] User: {user_message}")
@@ -277,17 +311,31 @@ class JewelrySalesBot:
     # -------------------------
     # Relative time resolver
     # -------------------------
-    def _resolve_relative_time(self, parsed_query: Dict[str, Any]) -> None:
+    def _resolve_relative_time(self, parsed_query: Dict[str, Any], user_message: str) -> None:
         norm = (parsed_query.get("normalized") or "").lower()
         filters = parsed_query.get("filters", {}) or {}
 
         def prev_month(month: int, year: int) -> Tuple[int, int]:
             return (12, year - 1) if month == 1 else (month - 1, year)
 
-        if "bulan ini" in norm or "bulan sekarang" in norm:
+        # Check if "bulan ini" / "tahun ini" was detected
+        has_current_bulan = "bulan ini" in norm or "bulan sekarang" in norm
+        has_current_tahun = "tahun ini" in norm
+
+        db_min_date, db_max_date = self.db.get_db_date_range()
+        now = datetime.now()
+
+        if has_current_bulan:
             m, y = self.db.get_latest_month_year()
             filters["bulan"] = m
             filters["tahun"] = y
+            
+            # Check if system current is outside DB range
+            if db_min_date and db_max_date:
+                if now.month > db_max_date.month and now.year == db_max_date.year:
+                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.strftime('%b %Y')} - {db_max_date.strftime('%b %Y')}. Fallback ke bulan terbaru: {m}/{y}"
+                elif now.year > db_max_date.year:
+                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.strftime('%b %Y')} - {db_max_date.strftime('%b %Y')}. Fallback ke bulan terbaru: {m}/{y}"
 
         if "bulan lalu" in norm:
             m, y = self.db.get_latest_month_year()
@@ -295,44 +343,96 @@ class JewelrySalesBot:
             filters["bulan"] = m2
             filters["tahun"] = y2
 
-        if "tahun ini" in norm:
+        if has_current_tahun:
             _, y = self.db.get_latest_month_year()
             filters["tahun"] = y
+            
+            if db_min_date and db_max_date:
+                if now.year > db_max_date.year:
+                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.year} - {db_max_date.year}. Fallback ke tahun terbaru: {y}"
 
         parsed_query["filters"] = filters
 
     # -------------------------
     # LLM rewrite hook
     # -------------------------
+    def _check_explicit_analysis_request(self, user_message: str) -> bool:
+        """
+        Check if user explicitly asks for analysis.
+        Keywords: ringkasan, insight, analisis, saran, rekomendasi, kesimpulan,
+                  jelaskan, kenapa, bandingkan
+        """
+        msg_lower = user_message.lower()
+        analysis_keywords = [
+            "ringkasan", "insight", "analisis", "saran", "rekomendasi", 
+            "kesimpulan", "jelaskan", "kenapa", "bandingkan"
+        ]
+        return any(keyword in msg_lower for keyword in analysis_keywords)
+
     def _maybe_rewrite_with_llm(
         self,
         user_message: str,
         parsed_query: Dict[str, Any],
-        response: Dict[str, Any]
+        response: Dict[str, Any],
     ) -> Dict[str, Any]:
-        if not self.use_llm or generate_llm_answer is None:
-            response["llm_used"] = False
+        """
+        Rewrite response using LLM ONLY if user explicitly asks for analysis.
+        Controlled by USE_LLM env var AND explicit request check.
+        Sets:
+        - llm_used: bool
+        - llm_error: str (if any)
+        - message_llm: str (if rewritten)
+        """
+
+        # Always put a default
+        response["llm_used"] = False
+
+        use_llm = env_bool("USE_LLM", False)
+        if not use_llm:
+            return response
+
+        # Check for explicit analysis request
+        if not self._check_explicit_analysis_request(user_message):
+            return response
+
+        if generate_llm_answer is None:
+            response["llm_error"] = "LLM module not available (import failed)."
             return response
 
         qtype = (response.get("query_type") or "").lower()
         if qtype not in ("detail", "summary"):
-            response["llm_used"] = False
             return response
+
+        # Optional: attach debug info
+        if self.debug:
+            response["llm_debug"] = {
+                "USE_LLM": os.getenv("USE_LLM"),
+                "OLLAMA_URL": os.getenv("OLLAMA_URL"),
+                "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL"),
+                "generate_llm_answer_available": True,
+            }
 
         try:
             rewritten = generate_llm_answer(user_message, parsed_query, response)
-            if rewritten:
+
+            if isinstance(rewritten, str) and rewritten.strip():
+                rewritten = rewritten.strip()
                 response["message_llm"] = rewritten
                 response["message"] = rewritten
                 response["llm_used"] = True
             else:
+                response["llm_error"] = "generate_llm_answer returned empty/None."
                 response["llm_used"] = False
+
         except LLMUnavailable as e:
-            response["llm_used"] = False
             response["llm_error"] = f"Ollama unavailable: {str(e)}"
-        except Exception as e:
             response["llm_used"] = False
+            logger.exception("Ollama unavailable")
+
+        except Exception as e:
             response["llm_error"] = f"LLM error: {str(e)}"
+            response["llm_used"] = False
+            logger.exception("LLM rewrite error")
 
         return response
 
@@ -342,9 +442,10 @@ class JewelrySalesBot:
     def _handle_detail_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
         filters = (parsed_query.get("filters") or {}).copy()
         confidence = parsed_query.get("confidence", 0.0)
+        relative_warning = parsed_query.get("_relative_time_warning")
 
         # Pagination (optional)
-        limit = int(filters.pop("limit", 5) or 5)
+        limit = int(filters.pop("limit", 10) or 10)
         offset = int(filters.pop("offset", 0) or 0)
         limit = max(1, min(limit, 50))  # safety: max 50 rows returned to UI
         offset = max(0, offset)
@@ -361,18 +462,20 @@ class JewelrySalesBot:
 
             if total_records > 0:
                 filter_desc = self._describe_filters(filters)
-                message = (
-                    f"✅ Ditemukan {total_records:,} transaksi"
-                    f"{f' {filter_desc}' if filter_desc else ''}.\n"
-                    f"Menampilkan {len(results)} baris (limit={limit}, offset={offset})."
-                )
+                remaining = total_records - len(results)
+                message = f"Ditemukan {total_records:,} data penjualan untuk {filter_desc}. Berikut {len(results)} data teratas."
+                if remaining > 0:
+                    message += f" (and {remaining:,} more…)"
             else:
                 filter_desc = self._describe_filters(filters)
                 message = (
                     f"❌ Tidak ada hasil"
-                    f"{f' {filter_desc}' if filter_desc else ''}.\n"
-                    f"Filter: {filters}"
+                    f"{f' {filter_desc}' if filter_desc else ''}."
                 )
+
+            # Prepend relative time warning if present
+            if relative_warning:
+                message = f"⚠️ {relative_warning}\n\n{message}"
 
             return {
                 "query_type": "detail",
@@ -385,6 +488,9 @@ class JewelrySalesBot:
                 "displayed": len(results),     # rows returned
                 "limit": limit,
                 "offset": offset,
+                "total_records": total_records,
+                "next_offset": (offset + limit) if (offset + limit) < total_records else None,
+                "prev_offset": max(0, offset - limit) if offset > 0 else None
             }
 
         except Exception as e:
@@ -621,7 +727,7 @@ class JewelrySalesBot:
     # ============================================================
     def _describe_filters(self, filters: Dict[str, Any]) -> str:
         if not filters:
-            return ""
+            return "(all data)"
         parts = []
 
         if "kode_barang" in filters:
@@ -634,8 +740,14 @@ class JewelrySalesBot:
             parts.append(f"tahun {filters['tahun']}")
         if "channel" in filters:
             parts.append(f"channel {filters['channel']}")
+        if "min_berat" in filters and "max_berat" in filters:
+            parts.append(f"berat {filters['min_berat']}-{filters['max_berat']}g")
+        elif "min_berat" in filters:
+            parts.append(f"berat >={filters['min_berat']}g")
+        elif "max_berat" in filters:
+            parts.append(f"berat <={filters['max_berat']}g")
 
-        return "(" + ", ".join(parts) + ")" if parts else ""
+        return "(" + ", ".join(parts) + ")" if parts else "(all data)"
 
 
 def create_bot(db_path: str) -> JewelrySalesBot:

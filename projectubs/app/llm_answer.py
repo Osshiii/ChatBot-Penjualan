@@ -127,7 +127,7 @@ def _post_clean(text: str) -> str:
 
 def generate_llm_answer(user_message: str, parsed_query: Dict[str, Any], response: Dict[str, Any]) -> str:
     if not _env_bool("USE_LLM", "0"):
-        return response.get("message", "")
+        return ""
 
     temp = _env_float("LLM_TEMPERATURE", 0.2)
     top_p = _env_float("LLM_TOP_P", 0.9)
