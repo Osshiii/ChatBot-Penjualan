@@ -5,6 +5,7 @@ NLP Parser for Jewelry Sales Chatbot (Indonesian)
 - Extract filters: kode_barang, lokasi, klasifikasi_barang, warna_barang, ukuran_barang,
   channel, bulan, tahun, min/max berat
 - Support relative time: "bulan ini", "bulan lalu", "tahun ini"
+- NEW: answer_mode (ringkasan / insight / saran / auto)
 """
 
 from __future__ import annotations
@@ -25,6 +26,13 @@ class QueryType(str, Enum):
 
     # backward compat alias (kalau ada code lama)
     FILTER = "detail"
+
+
+class AnswerMode(str, Enum):
+    AUTO = "auto"
+    RINGKASAN = "ringkasan"
+    INSIGHT = "insight"
+    SARAN = "saran"
 
 
 _MONTH_MAP = {
@@ -48,13 +56,10 @@ COUNT_HINTS = {"baris", "row", "rows", "transaksi", "record", "data", "jumlah tr
 EXPLORATORY_RULES = [
     (r"(kode barang|kode produk|produk)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_codes"),
     (r"(lokasi|store|toko)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_locations"),
-
     (r"(channel|chann?el|chennel|chenel|chanel)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_channels"),
     (r"(ada\s+)?berapa\s+(channel|chann?el|chennel|chenel|chanel)\b", "available_channels"),
-
     (r"(tahun)\s*(apa saja|yang ada|tersedia|rentang|range)", "year_range"),
     (r"(bulan)\s*(apa saja|yang ada|tersedia|rentang|range)", "month_range"),
-
     (r"(data apa saja|overview|gambaran data|ringkasan data)", "data_overview"),
 ]
 
@@ -89,7 +94,6 @@ def _parse_float(num_str: str) -> Optional[float]:
 
 
 def _month_from_text(text: str) -> Optional[int]:
-    # bulan 4 / bulan ke 4
     m = re.search(r"\bbulan(?:\s+ke)?\s*(\d{1,2})\b", text, flags=re.I)
     if m:
         try:
@@ -99,7 +103,6 @@ def _month_from_text(text: str) -> Optional[int]:
         except Exception:
             pass
 
-    # month name
     for name, num in _MONTH_MAP.items():
         if re.search(rf"\b{name}\b", text, flags=re.I):
             return num
@@ -145,7 +148,6 @@ def _extract_codes(text: str) -> Dict[str, str]:
 def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     t = text.lower()
 
-    # Range: "berat 5 sampai 10" or "berat 5-10"
     m = re.search(
         r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:-|sampai|sd|s/d|hingga|to)\s*([0-9]+(?:[.,][0-9]+)?)",
         t
@@ -153,7 +155,6 @@ def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     if m:
         return _parse_float(m.group(1)), _parse_float(m.group(2))
 
-    # Greater than / above: "berat di atas X", "berat lebih dari X", "berat > X", "berat >= X"
     m = re.search(
         r"\bberat(?:\s+satuan)?\s*(?:di\s+atas|lebih dari|>=|>)\s*([0-9]+(?:[.,][0-9]+)?)",
         t
@@ -161,7 +162,6 @@ def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     if m:
         return _parse_float(m.group(1)), None
 
-    # Less than / below: "berat di bawah X", "berat kurang dari X", "berat < X", "berat <= X"
     m = re.search(
         r"\bberat(?:\s+satuan)?\s*(?:di\s+bawah|kurang dari|<=|<)\s*([0-9]+(?:[.,][0-9]+)?)",
         t
@@ -169,7 +169,6 @@ def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     if m:
         return None, _parse_float(m.group(1))
 
-    # Single value (exact match or range)
     m = re.search(r"\bberat(?:\s+satuan)?\s*([0-9]+(?:[.,][0-9]+)?)", t)
     if m:
         v = _parse_float(m.group(1))
@@ -179,12 +178,6 @@ def _extract_weight_range(text: str) -> Tuple[Optional[float], Optional[float]]:
 
 
 def _apply_relative_time(text: str) -> Tuple[Optional[int], Optional[int]]:
-    """
-    Return (bulan, tahun) if detected from phrases like:
-    - "bulan ini", "bulan sekarang"
-    - "bulan lalu"
-    - "tahun ini"
-    """
     now = datetime.now()
     bulan = None
     tahun = None
@@ -208,7 +201,6 @@ def _apply_relative_time(text: str) -> Tuple[Optional[int], Optional[int]]:
 
 
 def _extract_limit(text: str) -> Optional[int]:
-    """Extract limit from queries like '10 baris', 'tampilkan 10 data', '5 penjualan', etc."""
     m = re.search(r"(\d{1,3})\s*(?:baris|data|row|rows|transaksi|record|penjualan)", text, flags=re.I)
     if m:
         try:
@@ -221,7 +213,6 @@ def _extract_limit(text: str) -> Optional[int]:
 def _extract_group_by(text: str) -> Optional[str]:
     t = text.lower()
 
-    # support "ringkasan lokasi" (tanpa kata "per")
     if re.search(r"\bringkasan\s+lokasi\b", t):
         return "LOKASI"
     if re.search(r"\bringkasan\s+(produk|kode barang|kode produk)\b", t):
@@ -247,6 +238,29 @@ def _extract_group_by(text: str) -> Optional[str]:
     return None
 
 
+def _detect_answer_mode(text: str) -> AnswerMode:
+    """
+    Pilih output yang diminta user:
+    - ringkasan: hanya ringkasan
+    - insight: hanya insight/analisis
+    - saran: hanya saran/rekomendasi
+    - auto: default
+    """
+    t = text.lower()
+
+    # prioritas: saran > insight > ringkasan (biar "saran ringkasan" tetap saran)
+    if re.search(r"\b(saran|rekomendasi|anjuran|next step|langkah selanjutnya|apa yang harus)\b", t):
+        return AnswerMode.SARAN
+
+    if re.search(r"\b(insight|analisis|analysis|tren|trend|kenapa|mengapa|sebab|paling|tertinggi|terendah|bandingkan|perbandingan)\b", t):
+        return AnswerMode.INSIGHT
+
+    if re.search(r"\b(ringkasan|summary|rekap|kesimpulan|resume)\b", t):
+        return AnswerMode.RINGKASAN
+
+    return AnswerMode.AUTO
+
+
 class NLPParser:
     def parse(self, user_message: str) -> Dict[str, Any]:
         raw = user_message or ""
@@ -259,11 +273,9 @@ class NLPParser:
         if ch is not None:
             filters["channel"] = ch
 
-        # month/year normal
         mo = _month_from_text(text)
         yr = _year_from_text(text)
 
-        # relative month/year
         rel_mo, rel_yr = _apply_relative_time(text)
 
         bulan = mo if mo is not None else rel_mo
@@ -280,7 +292,6 @@ class NLPParser:
         if wmax is not None:
             filters["max_berat"] = wmax
 
-        # Extract limit for "terbaru", "10 baris", etc.
         limit = _extract_limit(text)
         if limit is not None:
             filters["limit"] = limit
@@ -290,8 +301,11 @@ class NLPParser:
         group_by = _extract_group_by(text)
         confidence = self._estimate_confidence(query_type, filters, text)
 
+        answer_mode = _detect_answer_mode(text)
+
         return {
             "query_type": query_type,
+            "answer_mode": answer_mode.value,  # string biar gampang dipakai di luar
             "filters": filters,
             "group_by": group_by,
             "exploratory_intent": exploratory_intent,
@@ -314,19 +328,15 @@ class NLPParser:
         if ask_about:
             return QueryType.EXPLORATORY
 
-        # explicit summary keywords
         if any(k in text for k in ("ringkasan", "summary", "rekap", "agregat")):
             return QueryType.SUMMARY
 
-        # count
         if "berapa" in text and any(h in text for h in COUNT_HINTS):
             return QueryType.COUNT
 
-        # If filters exist or user asks to show/list/search => detail
         if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display", "terbaru", "latest")):
             return QueryType.DETAIL
 
-        # "per ..." without explicit summary word often implies summary
         if "per " in text or "berdasarkan" in text:
             return QueryType.SUMMARY
 

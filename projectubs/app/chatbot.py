@@ -5,6 +5,7 @@ Chatbot Module for Jewelry Sales AI Assistant
 - Supports: help, exploratory, detail (rows), summary (aggregate), count
 - Fix: relative time ("bulan ini", "bulan lalu", "tahun ini") based on latest data in DB
 - Optional: LLM rewrite (USE_LLM=1) for detail/summary responses
+- NEW: answer_mode -> ringkasan / insight / saran (output dipisah, tidak digabung)
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.nlp_parser import NLPParser, QueryType
 
-# Optional LLM (safe import)
 try:
     from app.llm_answer import generate_llm_answer
     from app.llm_client import LLMUnavailable
@@ -26,6 +26,7 @@ except Exception:
     LLMUnavailable = Exception
 
 logger = logging.getLogger(__name__)
+
 
 def env_bool(name: str, default: bool = False) -> bool:
     v = os.getenv(name)
@@ -38,8 +39,6 @@ def env_bool(name: str, default: bool = False) -> bool:
 # Database Layer
 # ============================================================
 class SalesDatabase:
-    """Helper class for database queries"""
-
     def __init__(self, db_path: str):
         self.db_path = db_path
 
@@ -52,13 +51,7 @@ class SalesDatabase:
         finally:
             conn.close()
 
-    def get_filter_values(self, column: str) -> List[str]:
-        sql = f"SELECT DISTINCT {column} FROM penjualan ORDER BY {column}"
-        results = self.execute_query(sql)
-        return [r[column] for r in results if r.get(column)]
-
     def get_latest_date(self) -> Optional[str]:
-        """Return max date string from DB (TANGGAL)."""
         sql = "SELECT MAX(TANGGAL) as max_tanggal FROM penjualan"
         res = self.execute_query(sql)
         if not res:
@@ -66,7 +59,6 @@ class SalesDatabase:
         return res[0].get("max_tanggal")
 
     def get_min_date(self) -> Optional[str]:
-        """Return min date string from DB (TANGGAL)."""
         sql = "SELECT MIN(TANGGAL) as min_tanggal FROM penjualan"
         res = self.execute_query(sql)
         if not res:
@@ -74,24 +66,16 @@ class SalesDatabase:
         return res[0].get("min_tanggal")
 
     def get_latest_month_year(self) -> Tuple[int, int]:
-        """
-        Determine "latest month/year" based on MAX(TANGGAL) in DB,
-        not based on system clock.
-        """
         max_tgl = self.get_latest_date()
         if not max_tgl:
             now = datetime.now()
             return now.month, now.year
 
-        s = str(max_tgl).strip()
-        # handle "YYYY-MM-DD HH:MM:SS"
-        s = s.split(" ")[0]
-
+        s = str(max_tgl).strip().split(" ")[0]
         try:
             dt = datetime.fromisoformat(s)
             return dt.month, dt.year
         except Exception:
-            # fallback: try parse common formats
             for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
                 try:
                     dt = datetime.strptime(s, fmt)
@@ -103,10 +87,9 @@ class SalesDatabase:
         return now.month, now.year
 
     def get_db_date_range(self) -> Tuple[Optional[datetime], Optional[datetime]]:
-        """Return min and max dates from DB."""
         min_tgl = self.get_min_date()
         max_tgl = self.get_latest_date()
-        
+
         def parse_date(s: str) -> Optional[datetime]:
             if not s:
                 return None
@@ -117,7 +100,7 @@ class SalesDatabase:
                 except Exception:
                     pass
             return None
-        
+
         return parse_date(min_tgl), parse_date(max_tgl)
 
 
@@ -125,14 +108,11 @@ class SalesDatabase:
 # Query Builder
 # ============================================================
 class SalesQueryBuilder:
-    """Build SQL queries based on filters (safe parameterized)"""
-
     @staticmethod
     def build_where_clause(filters: Dict[str, Any]) -> Tuple[str, List[Any]]:
         where_parts = ["1=1"]
         params: List[Any] = []
 
-        # Exact match filters
         if filters.get("kode_barang"):
             where_parts.append("KODE_BARANG = ?")
             params.append(filters["kode_barang"])
@@ -157,7 +137,6 @@ class SalesQueryBuilder:
             where_parts.append("CHANNEL = ?")
             params.append(filters["channel"])
 
-        # Time filters
         if filters.get("bulan") is not None:
             where_parts.append("BULAN = ?")
             params.append(filters["bulan"])
@@ -166,7 +145,6 @@ class SalesQueryBuilder:
             where_parts.append("TAHUN = ?")
             params.append(filters["tahun"])
 
-        # Date range filters
         if filters.get("date_from"):
             where_parts.append("TANGGAL >= ?")
             params.append(filters["date_from"])
@@ -175,7 +153,6 @@ class SalesQueryBuilder:
             where_parts.append("TANGGAL <= ?")
             params.append(filters["date_to"])
 
-        # Numeric range filters
         if filters.get("min_berat") is not None:
             where_parts.append("BERAT_SATUAN >= ?")
             params.append(filters["min_berat"])
@@ -252,9 +229,6 @@ class JewelrySalesBot:
         self.conversation_history: List[Dict[str, Any]] = []
         self.debug = env_bool("DEBUG", False)
 
-    # -------------------------
-    # Main entry
-    # -------------------------
     def process_message(self, user_message: str) -> Dict[str, Any]:
         self.conversation_history.append({
             "timestamp": datetime.now().isoformat(),
@@ -272,12 +246,13 @@ class JewelrySalesBot:
                 "confidence": 0.0,
             }
 
-        # Resolve relative time phrases based on DB (fix "bulan ini" jadi 2026 dll)
+        # Resolve relative time based on DB
         self._resolve_relative_time(parsed_query, user_message)
 
         if self.debug:
             print(f"[DEBUG] User: {user_message}")
             print(f"[DEBUG] Type: {parsed_query['query_type']}")
+            print(f"[DEBUG] AnswerMode: {parsed_query.get('answer_mode')}")
             print(f"[DEBUG] Filters: {parsed_query.get('filters', {})}")
             print(f"[DEBUG] Group: {parsed_query.get('group_by')}")
             print(f"[DEBUG] Confidence: {parsed_query.get('confidence', 0):.2f}")
@@ -297,7 +272,10 @@ class JewelrySalesBot:
         else:
             response = self._handle_unknown_query(parsed_query)
 
-        # LLM rewrite (detail/summary only)
+        # NEW: potong message sesuai answer_mode (non-LLM)
+        response = self._apply_answer_mode_non_llm(parsed_query, response)
+
+        # LLM rewrite (detail/summary) -> output juga harus sesuai answer_mode
         response = self._maybe_rewrite_with_llm(user_message, parsed_query, response)
 
         self.conversation_history.append({
@@ -318,7 +296,6 @@ class JewelrySalesBot:
         def prev_month(month: int, year: int) -> Tuple[int, int]:
             return (12, year - 1) if month == 1 else (month - 1, year)
 
-        # Check if "bulan ini" / "tahun ini" was detected
         has_current_bulan = "bulan ini" in norm or "bulan sekarang" in norm
         has_current_tahun = "tahun ini" in norm
 
@@ -329,13 +306,13 @@ class JewelrySalesBot:
             m, y = self.db.get_latest_month_year()
             filters["bulan"] = m
             filters["tahun"] = y
-            
-            # Check if system current is outside DB range
+
             if db_min_date and db_max_date:
-                if now.month > db_max_date.month and now.year == db_max_date.year:
-                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.strftime('%b %Y')} - {db_max_date.strftime('%b %Y')}. Fallback ke bulan terbaru: {m}/{y}"
-                elif now.year > db_max_date.year:
-                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.strftime('%b %Y')} - {db_max_date.strftime('%b %Y')}. Fallback ke bulan terbaru: {m}/{y}"
+                if (now.year > db_max_date.year) or (now.year == db_max_date.year and now.month > db_max_date.month):
+                    parsed_query["_relative_time_warning"] = (
+                        f"Data tersedia {db_min_date.strftime('%b %Y')} - {db_max_date.strftime('%b %Y')}. "
+                        f"Fallback ke bulan terbaru: {m}/{y}"
+                    )
 
         if "bulan lalu" in norm:
             m, y = self.db.get_latest_month_year()
@@ -346,53 +323,122 @@ class JewelrySalesBot:
         if has_current_tahun:
             _, y = self.db.get_latest_month_year()
             filters["tahun"] = y
-            
             if db_min_date and db_max_date:
                 if now.year > db_max_date.year:
-                    parsed_query["_relative_time_warning"] = f"Data tersedia {db_min_date.year} - {db_max_date.year}. Fallback ke tahun terbaru: {y}"
+                    parsed_query["_relative_time_warning"] = (
+                        f"Data tersedia {db_min_date.year} - {db_max_date.year}. "
+                        f"Fallback ke tahun terbaru: {y}"
+                    )
 
         parsed_query["filters"] = filters
 
     # -------------------------
-    # LLM rewrite hook
+    # NEW: Apply answer_mode without LLM
     # -------------------------
-    def _check_explicit_analysis_request(self, user_message: str) -> bool:
+    def _apply_answer_mode_non_llm(self, parsed_query: Dict[str, Any], response: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Check if user explicitly asks for analysis.
-        Keywords: ringkasan, insight, analisis, saran, rekomendasi, kesimpulan,
-                  jelaskan, kenapa, bandingkan
+        Kalau USE_LLM=0, kita tetap harus pisahin output.
+        Kalau query_type bukan summary/detail, biarin.
         """
-        msg_lower = user_message.lower()
-        analysis_keywords = [
-            "ringkasan", "insight", "analisis", "saran", "rekomendasi", 
-            "kesimpulan", "jelaskan", "kenapa", "bandingkan"
-        ]
-        return any(keyword in msg_lower for keyword in analysis_keywords)
+        answer_mode = (parsed_query.get("answer_mode") or "auto").lower()
+        qtype = (response.get("query_type") or "").lower()
 
+        # Kalau bukan summary/detail, ga ada yang dipotong.
+        if qtype not in ("summary", "detail"):
+            return response
+
+        # Kalau auto, biarin message asli dari handler.
+        if answer_mode == "auto":
+            return response
+
+        # SUMMARY: bikin message sesuai mode dari data agregat
+        if qtype == "summary":
+            data = response.get("data", []) or []
+            group_by = response.get("group_by") or parsed_query.get("group_by") or "KODE_BARANG"
+            filters = response.get("filters", parsed_query.get("filters", {})) or {}
+
+            total_transaksi = sum(int(r.get("count_records", 0) or 0) for r in data) if data else 0
+            total_unit = sum(float(r.get("total_jumlah", 0) or 0) for r in data) if data else 0.0
+            total_berat = sum(float(r.get("total_berat", 0) or 0) for r in data) if data else 0.0
+
+            # weighted avg
+            if total_transaksi > 0:
+                avg_berat = (
+                    sum((float(r.get("avg_berat", 0) or 0) * int(r.get("count_records", 0) or 0)) for r in data)
+                    / total_transaksi
+                )
+            else:
+                avg_berat = 0.0
+
+            if answer_mode == "ringkasan":
+                response["message"] = (
+                    f"📊 Ringkasan penjualan berdasarkan {group_by}\n"
+                    f"Total transaksi: {total_transaksi:,}\n"
+                    f"Total unit: {total_unit:,.0f}\n"
+                    f"Total berat: {total_berat:,.2f} g\n"
+                    f"Rata-rata berat: {avg_berat:.2f} g/item"
+                )
+                return response
+
+            if answer_mode == "insight":
+                top = data[:3]
+                lines = [f"🔎 Insight berdasarkan {group_by}:"]
+                if not top:
+                    lines.append("- Tidak ada data untuk dianalisis.")
+                else:
+                    # 1) top transaksi
+                    top1 = top[0]
+                    lines.append(
+                        f"- Kategori teratas: {top1.get('kategori')} "
+                        f"({int(top1.get('count_records', 0) or 0):,} transaksi, "
+                        f"total {float(top1.get('total_berat', 0) or 0):,.2f} g)."
+                    )
+
+                    # 2) avg tertinggi dari top 20
+                    best_avg = max(data, key=lambda r: float(r.get("avg_berat", 0) or 0)) if data else None
+                    if best_avg:
+                        lines.append(
+                            f"- Rata-rata berat tertinggi: {best_avg.get('kategori')} "
+                            f"({float(best_avg.get('avg_berat', 0) or 0):.2f} g/item)."
+                        )
+
+                    # 3) kontribusi 3 besar (berdasarkan total_jumlah)
+                    total_qty_all = sum(float(r.get("total_jumlah", 0) or 0) for r in data) if data else 0.0
+                    top3_qty = sum(float(r.get("total_jumlah", 0) or 0) for r in top) if top else 0.0
+                    if total_qty_all > 0:
+                        share = (top3_qty / total_qty_all) * 100.0
+                        lines.append(f"- 3 kategori teratas menyumbang sekitar {share:.1f}% dari total unit.")
+                response["message"] = "\n".join(lines)
+                return response
+
+            if answer_mode == "saran":
+                desc = self._describe_filters(filters)
+                lines = ["✅ Saran lanjutan:"]
+                lines.append(f"- Kalau datanya masih terlalu umum {desc}, coba batasi bulan/tahun atau lokasi.")
+                lines.append(f"- Lihat detail kategori teratas di {group_by} untuk cek transaksi per baris (detail query).")
+                lines.append("- Bandingkan per channel/lokasi untuk melihat sumber kontribusi terbesar.")
+                response["message"] = "\n".join(lines)
+                return response
+
+            return response
+
+        # DETAIL: untuk sekarang simple (pisahin output detail jadi ringkasan/insight/saran juga bisa,
+        # tapi kamu fokusnya summary per produk; jadi cukup biarin).
+        return response
+
+    # -------------------------
+    # LLM rewrite hook (NEW: pakai answer_mode, bukan gabungan)
+    # -------------------------
     def _maybe_rewrite_with_llm(
         self,
         user_message: str,
         parsed_query: Dict[str, Any],
         response: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        Rewrite response using LLM ONLY if user explicitly asks for analysis.
-        Controlled by USE_LLM env var AND explicit request check.
-        Sets:
-        - llm_used: bool
-        - llm_error: str (if any)
-        - message_llm: str (if rewritten)
-        """
 
-        # Always put a default
         response["llm_used"] = False
 
-        use_llm = env_bool("USE_LLM", False)
-        if not use_llm:
-            return response
-
-        # Check for explicit analysis request
-        if not self._check_explicit_analysis_request(user_message):
+        if not env_bool("USE_LLM", False):
             return response
 
         if generate_llm_answer is None:
@@ -403,22 +449,22 @@ class JewelrySalesBot:
         if qtype not in ("detail", "summary"):
             return response
 
-        # Optional: attach debug info
-        if self.debug:
-            response["llm_debug"] = {
-                "USE_LLM": os.getenv("USE_LLM"),
-                "OLLAMA_URL": os.getenv("OLLAMA_URL"),
-                "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL"),
-                "generate_llm_answer_available": True,
-            }
+        # NEW: kalau answer_mode auto, jangan LLM (biar tidak keluar 3 blok)
+        answer_mode = (parsed_query.get("answer_mode") or "auto").lower()
+        if answer_mode == "auto":
+            return response
 
         try:
-            rewritten = generate_llm_answer(user_message, parsed_query, response)
+            rewritten = generate_llm_answer(
+                user_message=user_message,
+                parsed_query=parsed_query,
+                response=response,
+                answer_mode=answer_mode,   # <-- NEW
+            )
 
             if isinstance(rewritten, str) and rewritten.strip():
-                rewritten = rewritten.strip()
-                response["message_llm"] = rewritten
-                response["message"] = rewritten
+                response["message_llm"] = rewritten.strip()
+                response["message"] = rewritten.strip()
                 response["llm_used"] = True
             else:
                 response["llm_error"] = "generate_llm_answer returned empty/None."
@@ -444,19 +490,16 @@ class JewelrySalesBot:
         confidence = parsed_query.get("confidence", 0.0)
         relative_warning = parsed_query.get("_relative_time_warning")
 
-        # Pagination (optional)
         limit = int(filters.pop("limit", 10) or 10)
         offset = int(filters.pop("offset", 0) or 0)
-        limit = max(1, min(limit, 50))  # safety: max 50 rows returned to UI
+        limit = max(1, min(limit, 50))
         offset = max(0, offset)
 
         try:
-            # count (full)
             count_sql, count_params = SalesQueryBuilder.build_count_query(filters)
             count_result = self.db.execute_query(count_sql, tuple(count_params))
             total_records = int(count_result[0].get("total", 0)) if count_result else 0
 
-            # sample rows
             detail_sql, detail_params = SalesQueryBuilder.build_detail_query(filters, limit=limit, offset=offset)
             results = self.db.execute_query(detail_sql, tuple(detail_params))
 
@@ -468,24 +511,20 @@ class JewelrySalesBot:
                     message += f" (and {remaining:,} more…)"
             else:
                 filter_desc = self._describe_filters(filters)
-                message = (
-                    f"❌ Tidak ada hasil"
-                    f"{f' {filter_desc}' if filter_desc else ''}."
-                )
+                message = f"❌ Tidak ada hasil{f' {filter_desc}' if filter_desc else ''}."
 
-            # Prepend relative time warning if present
             if relative_warning:
                 message = f"⚠️ {relative_warning}\n\n{message}"
 
             return {
                 "query_type": "detail",
                 "message": message,
-                "data": results,              # <-- ini yang dipakai UI buat tabel
+                "data": results,
                 "sql": detail_sql,
                 "filters": filters,
                 "confidence": confidence,
-                "count": total_records,       # total matching
-                "displayed": len(results),     # rows returned
+                "count": total_records,
+                "displayed": len(results),
                 "limit": limit,
                 "offset": offset,
                 "total_records": total_records,
@@ -508,7 +547,6 @@ class JewelrySalesBot:
         filters = (parsed_query.get("filters") or {}).copy()
         confidence = parsed_query.get("confidence", 0.0)
 
-        # ignore pagination keys
         filters.pop("limit", None)
         filters.pop("offset", None)
 
@@ -518,10 +556,7 @@ class JewelrySalesBot:
             total = int(count_result[0].get("total", 0)) if count_result else 0
 
             filter_desc = self._describe_filters(filters)
-            message = (
-                f"📊 Ditemukan {total:,} transaksi"
-                f"{f' {filter_desc}' if filter_desc else ''}."
-            )
+            message = f"📊 Ditemukan {total:,} transaksi{f' {filter_desc}' if filter_desc else ''}."
 
             return {
                 "query_type": "count",
@@ -564,10 +599,8 @@ class JewelrySalesBot:
                     if total_records else 0.0
                 )
 
-                filter_desc = self._describe_filters(filters)
                 message = (
-                    f"📊 Ringkasan penjualan berdasarkan {group_by}"
-                    f"{f' {filter_desc}' if filter_desc else ''}.\n"
+                    f"📊 Ringkasan penjualan berdasarkan {group_by}\n"
                     f"Total transaksi: {total_records:,} | Total qty: {total_qty:,.0f} | Total berat: {total_berat:,.2f} g | Avg berat: {avg_berat:.2f} g/item"
                 )
             else:
@@ -576,7 +609,7 @@ class JewelrySalesBot:
             return {
                 "query_type": "summary",
                 "message": message,
-                "data": results,          # <-- UI bisa tabelin top 20 ringkasan
+                "data": results,
                 "sql": sql,
                 "filters": filters,
                 "confidence": confidence,
@@ -627,7 +660,6 @@ class JewelrySalesBot:
         sql = "SELECT DISTINCT TAHUN FROM penjualan ORDER BY TAHUN"
         years = self.db.execute_query(sql)
         year_list = [str(r["TAHUN"]) for r in years if r.get("TAHUN") is not None]
-
         if year_list:
             return {
                 "query_type": "exploratory",
@@ -722,9 +754,6 @@ class JewelrySalesBot:
             "confidence": conf,
         }
 
-    # ============================================================
-    # Utils
-    # ============================================================
     def _describe_filters(self, filters: Dict[str, Any]) -> str:
         if not filters:
             return "(all data)"
