@@ -7,38 +7,78 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="chat-app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-sidebar">
+                <div class="logo-icon">💎</div>
+                <span class="logo-text">Jewelry AI</span>
+            </div>
+        </div>
+
+        <button class="btn-new-chat-sidebar" id="btnNewChatSidebar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+            </svg>
+            <span>Chat Baru</span>
+        </button>
+
+        <div class="chat-history">
+            <div class="history-header">
+                <h3>Riwayat Chat</h3>
+            </div>
+            <div class="history-list" id="historyList">
+                <!-- History items will be injected here -->
+            </div>
+        </div>
+    </aside>
+
+    <!-- Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- Main Content -->
+    <div class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <div class="topbar-content">
-                <h1 class="topbar-title">💎 Jewelry Sales AI</h1>
-            </div>
-            <button class="btn-icon" id="btnNewChat" aria-label="New chat" onclick="handleNewChat()">
-                New Chat
+            <button class="btn-toggle-sidebar" id="btnToggleSidebar" aria-label="Toggle sidebar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12h18M3 6h18M3 18h18"/>
+                </svg>
             </button>
+            
+            <div class="topbar-content">
+                <div class="topbar-text">
+                    <h1 class="topbar-title">Jewelry Sales AI</h1>
+                    <p class="topbar-subtitle">Asisten analisis penjualan perhiasan profesional</p>
+                </div>
+            </div>
         </header>
 
         <!-- Chat Container -->
         <main class="chat-container">
             <div class="messages-wrapper" id="messagesWrapper">
-                <!-- Empty state akan di-inject via JS -->
+                <!-- Messages will be injected here -->
             </div>
         </main>
 
-        <!-- Composer (Input) -->
+        <!-- Composer -->
         <footer class="composer">
             <div class="composer-content">
-                <textarea 
-                    id="inputMessage" 
-                    class="input-text"
-                    placeholder="Ketik pertanyaan Anda..."
-                    rows="1"
-                ></textarea>
-                <button class="btn-send" id="btnSend" aria-label="Send message" onclick="handleSend()">
-                    ➤
+                <div class="input-wrapper">
+                    <textarea 
+                        id="inputMessage" 
+                        class="input-text"
+                        placeholder="Tanyakan tentang data penjualan perhiasan..."
+                        rows="1"
+                    ></textarea>
+                </div>
+                <button class="btn-send" id="btnSend" aria-label="Send message">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                    </svg>
                 </button>
             </div>
-            <div class="composer-hint">Enter = kirim • Shift+Enter = baris baru</div>
+            <div class="composer-hint">Tekan Enter untuk mengirim • Shift+Enter untuk baris baru</div>
         </footer>
     </div>
 

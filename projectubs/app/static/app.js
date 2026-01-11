@@ -1,66 +1,310 @@
-// DOM Elements
+// ==================== DOM ELEMENTS ====================
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+const btnToggleSidebar = document.getElementById('btnToggleSidebar');
+// const btnCloseSidebar = document.getElementById('btnCloseSidebar');
+const btnNewChatSidebar = document.getElementById('btnNewChatSidebar');
+const historyList = document.getElementById('historyList');
 const messagesWrapper = document.getElementById('messagesWrapper');
 const inputMessage = document.getElementById('inputMessage');
 const btnSend = document.getElementById('btnSend');
-const btnNewChat = document.getElementById('btnNewChat');
+const mainContent = document.querySelector('.main-content');
 
-console.log('Script loaded');
-console.log('Elements:', { messagesWrapper, inputMessage, btnSend, btnNewChat });
-
-// State
+// ==================== STATE ====================
 let isLoading = false;
-let lastQueryRequestedAnalysis = false;
+let currentChatId = null;
+let chatHistory = [];
 
-// Initialize immediately
+// ==================== INITIALIZATION ====================
 function initApp() {
-    console.log('initApp called');
+    console.log('🚀 Initializing Jewelry Sales Chatbot...');
+    loadChatHistory();
     showEmptyState();
+    attachEventListeners();
     
-    // Attach event listeners
-    if (btnSend) {
-        btnSend.onclick = handleSend;
-        console.log('btnSend onclick attached');
-    }
-    
-    if (btnNewChat) {
-        btnNewChat.onclick = handleNewChat;
-        console.log('btnNewChat onclick attached');
-    }
-    
-    if (inputMessage) {
-        inputMessage.onkeydown = handleInputKeydown;
-        console.log('inputMessage onkeydown attached');
+    // Check screen size and close sidebar on mobile
+    if (window.innerWidth <= 768) {
+        closeSidebar();
     }
 }
 
-// Run on load
+function attachEventListeners() {
+    btnToggleSidebar?.addEventListener('click', toggleSidebar);
+    // btnCloseSidebar?.addEventListener('click', closeSidebar);
+    sidebarOverlay?.addEventListener('click', closeSidebar);
+    btnNewChatSidebar?.addEventListener('click', handleNewChat);
+    btnSend?.addEventListener('click', handleSend);
+    inputMessage?.addEventListener('keydown', handleInputKeydown);
+    inputMessage?.addEventListener('input', autoResizeTextarea);
+}
+
+// Initialize on load
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp);
 } else {
     initApp();
 }
 
-// Show empty state
+// ==================== SIDEBAR FUNCTIONS ====================
+function toggleSidebar() {
+    const isClosed = sidebar.classList.contains('closed');
+    if (isClosed) {
+        openSidebar();
+    } else {
+        closeSidebar();
+    }
+}
+
+function closeSidebar() {
+    sidebar.classList.add('closed');
+    sidebar.classList.remove('open');
+    mainContent.classList.add('sidebar-closed');
+    sidebarOverlay.classList.remove('active');
+}
+
+function openSidebar() {
+    sidebar.classList.remove('closed');
+    sidebar.classList.add('open');
+    mainContent.classList.remove('sidebar-closed');
+    
+    if (window.innerWidth <= 768) {
+        sidebarOverlay.classList.add('active');
+    }
+}
+
+// ==================== CHAT HISTORY ====================
+function loadChatHistory() {
+    const saved = localStorage.getItem('jewelryChatHistory');
+    if (saved) {
+        try {
+            chatHistory = JSON.parse(saved);
+        } catch (e) {
+            console.error('Error parsing chat history:', e);
+            chatHistory = [];
+        }
+    } else {
+        // Demo data
+        chatHistory = [
+            {
+                id: 'demo-1',
+                title: 'Analisis Penjualan Bulan Ini',
+                timestamp: new Date(Date.now() - 3600000).toISOString(),
+                messages: []
+            },
+            {
+                id: 'demo-2',
+                title: 'Ringkasan Per Produk',
+                timestamp: new Date(Date.now() - 86400000).toISOString(),
+                messages: []
+            }
+        ];
+    }
+    renderChatHistory();
+}
+
+function saveChatHistory() {
+    try {
+        localStorage.setItem('jewelryChatHistory', JSON.stringify(chatHistory));
+    } catch (e) {
+        console.error('Error saving chat history:', e);
+    }
+}
+
+function renderChatHistory() {
+    if (!historyList) return;
+    
+    if (chatHistory.length === 0) {
+        historyList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Belum ada riwayat chat</div>';
+        return;
+    }
+    
+    historyList.innerHTML = chatHistory.map(chat => `
+        <div class="history-item ${chat.id === currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
+            <div class="history-item-content">
+                <div class="history-item-title">${escapeHtml(chat.title)}</div>
+                <div class="history-item-time">${formatTimeAgo(chat.timestamp)}</div>
+            </div>
+            <div class="history-item-actions">
+                <button class="btn-history-action btn-rename" title="Rename" data-chat-id="${chat.id}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                </button>
+                <button class="btn-history-action btn-delete" title="Delete" data-chat-id="${chat.id}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    // Attach event listeners
+    document.querySelectorAll('.history-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (!e.target.closest('.btn-history-action')) {
+                loadChat(item.dataset.chatId);
+            }
+        });
+    });
+    
+    document.querySelectorAll('.btn-rename').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameChat(btn.dataset.chatId);
+        });
+    });
+    
+    document.querySelectorAll('.btn-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteChat(btn.dataset.chatId);
+        });
+    });
+}
+
+function formatTimeAgo(timestamp) {
+    const now = new Date();
+    const then = new Date(timestamp);
+    const diffMs = now - then;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Baru saja';
+    if (diffMins < 60) return `${diffMins} menit lalu`;
+    if (diffHours < 24) return `${diffHours} jam lalu`;
+    if (diffDays < 7) return `${diffDays} hari lalu`;
+    
+    return then.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+}
+
+function createNewChat(firstMessage = null) {
+    const newChat = {
+        id: 'chat-' + Date.now(),
+        title: firstMessage ? firstMessage.substring(0, 50) : 'Chat Baru',
+        timestamp: new Date().toISOString(),
+        messages: []
+    };
+    
+    chatHistory.unshift(newChat);
+    currentChatId = newChat.id;
+    saveChatHistory();
+    renderChatHistory();
+    
+    return newChat;
+}
+
+function loadChat(chatId) {
+    const chat = chatHistory.find(c => c.id === chatId);
+    if (!chat) return;
+    
+    currentChatId = chatId;
+    messagesWrapper.innerHTML = '';
+    
+    if (chat.messages.length === 0) {
+        showEmptyState();
+    } else {
+        chat.messages.forEach(msg => {
+            addMessage(msg.text, msg.role, msg.data, msg.totalCount);
+        });
+    }
+    
+    renderChatHistory();
+    
+    if (window.innerWidth <= 768) {
+        closeSidebar();
+    }
+}
+
+function renameChat(chatId) {
+    const chat = chatHistory.find(c => c.id === chatId);
+    if (!chat) return;
+    
+    const newTitle = prompt('Masukkan nama baru:', chat.title);
+    if (newTitle && newTitle.trim()) {
+        chat.title = newTitle.trim();
+        saveChatHistory();
+        renderChatHistory();
+    }
+}
+
+function deleteChat(chatId) {
+    if (!confirm('Hapus riwayat chat ini?')) return;
+    
+    chatHistory = chatHistory.filter(c => c.id !== chatId);
+    
+    if (currentChatId === chatId) {
+        currentChatId = null;
+        messagesWrapper.innerHTML = '';
+        showEmptyState();
+    }
+    
+    saveChatHistory();
+    renderChatHistory();
+}
+
+function getCurrentChat() {
+    if (!currentChatId) {
+        return createNewChat();
+    }
+    return chatHistory.find(c => c.id === currentChatId);
+}
+
+function saveChatMessage(text, role, data = null, totalCount = null) {
+    const chat = getCurrentChat();
+    if (!chat) return;
+    
+    chat.messages.push({ text, role, data, totalCount });
+    chat.timestamp = new Date().toISOString();
+    
+    // Update title from first user message
+    if (role === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
+        chat.title = text.substring(0, 50) + (text.length > 50 ? '...' : '');
+    }
+    
+    saveChatHistory();
+    renderChatHistory();
+}
+
+// ==================== MESSAGE HANDLING ====================
 function showEmptyState() {
-    console.log('showEmptyState called');
     messagesWrapper.innerHTML = `
         <div class="empty-state">
-            <div class="empty-icon">💎</div>
+            <div class="empty-logo">💎</div>
             <h2 class="empty-title">Jewelry Sales AI</h2>
-            <p class="empty-subtitle">Mulai bertanya tentang penjualan perhiasan</p>
-            <div class="quick-chips">
-                <button class="chip" onclick="sendChip('Ringkasan penjualan per produk')">Ringkasan per produk</button>
-                <button class="chip" onclick="sendChip('Penjualan bulan ini')">Penjualan bulan ini</button>
-                <button class="chip" onclick="sendChip('Data per lokasi')">Data per lokasi</button>
-                <button class="chip" onclick="sendChip('Penjualan terbaru')">Penjualan terbaru</button>
+            <p class="empty-subtitle">Dapatkan insight mendalam tentang penjualan perhiasan Anda</p>
+            <div class="quick-actions">
+                <button class="action-card" onclick="sendQuickAction('Ringkasan penjualan per produk')">
+                    <div class="action-icon">📊</div>
+                    <span>Ringkasan per produk</span>
+                </button>
+                <button class="action-card" onclick="sendQuickAction('Penjualan bulan ini')">
+                    <div class="action-icon">📈</div>
+                    <span>Penjualan bulan ini</span>
+                </button>
+                <button class="action-card" onclick="sendQuickAction('Analisis per lokasi')">
+                    <div class="action-icon">📍</div>
+                    <span>Analisis per lokasi</span>
+                </button>
+                <button class="action-card" onclick="sendQuickAction('Transaksi terbaru')">
+                    <div class="action-icon">🔔</div>
+                    <span>Transaksi terbaru</span>
+                </button>
             </div>
         </div>
     `;
 }
 
-// Add message to chat
 function addMessage(text, role, data = null, totalCount = null) {
-    console.log('addMessage:', { text, role, data });
+    // Remove empty state if it exists
+    const emptyState = messagesWrapper.querySelector('.empty-state');
+    if (emptyState) {
+        emptyState.remove();
+    }
+    
     const messageEl = document.createElement('div');
     messageEl.className = `message ${role}`;
     
@@ -75,7 +319,9 @@ function addMessage(text, role, data = null, totalCount = null) {
         
         if (data && data.length > 0) {
             const tableEl = buildTable(data, totalCount);
-            bubbleEl.appendChild(tableEl);
+            if (tableEl) {
+                bubbleEl.appendChild(tableEl);
+            }
         }
     } else {
         bubbleEl.textContent = text;
@@ -84,161 +330,94 @@ function addMessage(text, role, data = null, totalCount = null) {
     messageEl.appendChild(bubbleEl);
     messagesWrapper.appendChild(messageEl);
     
-    // Scroll to bottom
     setTimeout(() => {
-        messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
-    }, 0);
+        messagesWrapper.parentElement.scrollTop = messagesWrapper.parentElement.scrollHeight;
+    }, 100);
 }
 
-// Escape HTML to prevent XSS
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Build table DOM element for data
-function buildTable(rows, totalCount) {
-    if (!rows || rows.length === 0) return null;
-
-    const cols = Object.keys(rows[0]);
+function buildTable(data, totalCount) {
+    if (!Array.isArray(data) || data.length === 0) return null;
     
-    const wrapper = document.createElement('div');
-    wrapper.className = 'table-scroll';
+    const scrollDiv = document.createElement('div');
+    scrollDiv.className = 'table-scroll';
     
     const table = document.createElement('table');
     table.className = 'data-table';
     
+    // Headers
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
-    cols.forEach(c => {
+    Object.keys(data[0]).forEach(key => {
         const th = document.createElement('th');
-        th.textContent = c;
+        th.textContent = key;
         headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
     table.appendChild(thead);
     
+    // Body
     const tbody = document.createElement('tbody');
-    rows.forEach(r => {
-        const row = document.createElement('tr');
-        cols.forEach(c => {
+    data.forEach(row => {
+        const tr = document.createElement('tr');
+        Object.values(row).forEach(val => {
             const td = document.createElement('td');
-            td.textContent = r[c] ?? '';
-            row.appendChild(td);
+            td.textContent = val;
+            tr.appendChild(td);
         });
-        tbody.appendChild(row);
+        tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     
-    wrapper.appendChild(table);
-    if (typeof totalCount === "number" && totalCount > rows.length) {
-        const more = totalCount - rows.length;
-        const note = document.createElement("div");
-        note.className = "table-more";
-        note.textContent = `and ${more.toLocaleString()} more…`;
-        wrapper.appendChild(note);
-    }
-    return wrapper;
-}
-
-function getPayload(data) {
-    return data?.response ?? data;
-}
-
-// Check if user asked for analysis
-function userAskedForAnalysis(message) {
-    const msg = message.toLowerCase();
-    const keywords = [
-        "ringkasan", "insight", "analisis", "saran", "rekomendasi",
-        "kesimpulan", "jelaskan", "kenapa", "bandingkan"
-    ];
-    return keywords.some(kw => msg.includes(kw));
-}
-
-// Send message
-async function handleSend() {
-    console.log('handleSend called');
-    const text = inputMessage.value.trim();
-    console.log('Message text:', text);
+    scrollDiv.appendChild(table);
     
-    if (!text || isLoading) {
-        console.log('Aborting: no text or loading');
-        return;
+    if (totalCount && totalCount > data.length) {
+        const moreDiv = document.createElement('div');
+        moreDiv.className = 'table-more';
+        moreDiv.textContent = `Menampilkan ${data.length} dari ${totalCount} data`;
+        scrollDiv.appendChild(moreDiv);
     }
     
-    lastQueryRequestedAnalysis = userAskedForAnalysis(text);
+    return scrollDiv;
+}
+
+function addTypingIndicator() {
+    const messageEl = document.createElement('div');
+    messageEl.className = 'message assistant';
+    messageEl.id = 'typing-indicator';
     
-    isLoading = true;
-    btnSend.disabled = true;
+    const bubbleEl = document.createElement('div');
+    bubbleEl.className = 'bubble assistant';
     
-    // Remove empty state if present
-    const emptyState = messagesWrapper.querySelector('.empty-state');
-    if (emptyState) {
-        messagesWrapper.innerHTML = '';
-    }
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'typing-indicator';
+    typingDiv.innerHTML = `
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+    `;
     
-    console.log('Adding user message:', text);
-    addMessage(text, 'user');
-    inputMessage.value = '';
-    inputMessage.focus();
+    bubbleEl.appendChild(typingDiv);
+    messageEl.appendChild(bubbleEl);
+    messagesWrapper.appendChild(messageEl);
     
-    try {
-        console.log('Sending request to /chat');
-        const response = await fetch('/chat?query=' + encodeURIComponent(text), {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        console.log('Response status:', response.status);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log('Response data:', data);
+    setTimeout(() => {
+        messagesWrapper.parentElement.scrollTop = messagesWrapper.parentElement.scrollHeight;
+    }, 100);
+}
 
-        const payload = getPayload(data);
-
-        let replyText = 'Maaf, tidak ada respons dari server.';
-
-        if (typeof payload === 'string') {
-            replyText = payload;
-        } else if (payload?.message) {
-            replyText = payload.message;
-        } else if (payload && typeof payload === 'object') {
-            replyText = JSON.stringify(payload, null, 2);
-        }
-
-        console.log('Adding bot message:', replyText);
-        
-        // Determine if we should show table
-        const shouldShowTable = 
-            payload?.data && 
-            payload.data.length > 0 && 
-            !lastQueryRequestedAnalysis;
-        
-        const totalCount = payload?.count ?? payload?.total_records ?? null;
-        
-        addMessage(
-            replyText,
-            'assistant',
-            shouldShowTable ? payload.data : null,
-            totalCount
-        );
-
-    } catch (error) {
-        console.error('Error:', error);
-        addMessage(`❌ Error: ${error.message}`, 'assistant');
-    } finally {
-        isLoading = false;
-        btnSend.disabled = false;
-        inputMessage.focus();
+function removeTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) {
+        indicator.remove();
     }
 }
 
-// Handle input keydown
+// ==================== USER INPUT ====================
+function autoResizeTextarea() {
+    inputMessage.style.height = 'auto';
+    inputMessage.style.height = Math.min(inputMessage.scrollHeight, 150) + 'px';
+}
+
 function handleInputKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -246,19 +425,84 @@ function handleInputKeydown(e) {
     }
 }
 
-// Send from chip
-function sendChip(text) {
-    inputMessage.value = text;
+function handleNewChat() {
+    currentChatId = null;
+    messagesWrapper.innerHTML = '';
+    showEmptyState();
+    inputMessage.value = '';
+    autoResizeTextarea();
     inputMessage.focus();
+    
+    if (window.innerWidth <= 768) {
+        closeSidebar();
+    }
+}
+
+function handleSend() {
+    const query = inputMessage.value.trim();
+    if (!query || isLoading) return;
+    
+    // Clear input
+    inputMessage.value = '';
+    autoResizeTextarea();
+    
+    // Add user message
+    addMessage(query, 'user');
+    saveChatMessage(query, 'user');
+    
+    // Send to backend
+    sendQuery(query);
+}
+
+function sendQuickAction(text) {
+    inputMessage.value = text;
     handleSend();
 }
 
-// New chat
-function handleNewChat() {
-    inputMessage.value = '';
-    isLoading = false;
-    btnSend.disabled = false;
-    lastQueryRequestedAnalysis = false;
-    showEmptyState();
-    inputMessage.focus();
+async function sendQuery(query) {
+    isLoading = true;
+    btnSend.disabled = true;
+    
+    addTypingIndicator();
+    
+    try {
+        const response = await fetch('/query', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        
+        const result = await response.json();
+        
+        removeTypingIndicator();
+        
+        const text = result.response || 'Maaf, terjadi kesalahan.';
+        const data = result.data || null;
+        const totalCount = result.total_count || null;
+        
+        addMessage(text, 'assistant', data, totalCount);
+        saveChatMessage(text, 'assistant', data, totalCount);
+        
+    } catch (error) {
+        console.error('Error:', error);
+        removeTypingIndicator();
+        addMessage('Maaf, terjadi kesalahan saat memproses permintaan Anda.', 'assistant');
+    } finally {
+        isLoading = false;
+        btnSend.disabled = false;
+        inputMessage.focus();
+    }
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
