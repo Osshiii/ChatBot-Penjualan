@@ -462,33 +462,27 @@ function sendQuickAction(text) {
 async function sendQuery(query) {
     isLoading = true;
     btnSend.disabled = true;
-    
+
     addTypingIndicator();
-    
+
     try {
-        const response = await fetch('/query', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ query })
-        });
-        
+        const response = await fetch(`/chat?query=${encodeURIComponent(query)}`);
+
         if (!response.ok) {
             throw new Error('Network response was not ok');
         }
-        
+
         const result = await response.json();
-        
+
         removeTypingIndicator();
-        
-        const text = result.response || 'Maaf, terjadi kesalahan.';
+
+        const text = result.message || 'Tidak ada jawaban.';
         const data = result.data || null;
         const totalCount = result.total_count || null;
-        
+
         addMessage(text, 'assistant', data, totalCount);
         saveChatMessage(text, 'assistant', data, totalCount);
-        
+
     } catch (error) {
         console.error('Error:', error);
         removeTypingIndicator();
@@ -499,6 +493,7 @@ async function sendQuery(query) {
         inputMessage.focus();
     }
 }
+
 
 // ==================== UTILITY FUNCTIONS ====================
 function escapeHtml(text) {
