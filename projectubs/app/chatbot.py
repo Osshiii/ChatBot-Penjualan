@@ -1363,7 +1363,7 @@ class JewelrySalesBot:
                 "displayed": len(results),
                 "limit": limit,
                 "offset": offset,
-                "total_records": total_records,
+                "total_count": total_records,
                 "next_offset": (offset + limit) if (offset + limit) < total_records else None,
                 "prev_offset": max(0, offset - limit) if offset > 0 else None
             }

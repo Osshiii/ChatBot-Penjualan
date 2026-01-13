@@ -15,6 +15,11 @@ let isLoading = false;
 let currentChatId = null;
 let chatHistory = [];
 
+// Pagination state
+let currentPage = 1;
+const pageSize = 10;
+let lastQuery = null;
+
 // Delete confirmation state
 let deleteConfirmState = {
     isConfirmOpen: false,
@@ -525,7 +530,7 @@ function addMessage(text, role, data = null, totalCount = null) {
         bubbleEl.appendChild(textDiv);
         
         if (data && data.length > 0) {
-            const tableEl = buildTable(data, totalCount);
+            const tableEl = buildTable(data, totalCount, currentPage);
             if (tableEl) {
                 bubbleEl.appendChild(tableEl);
             }
@@ -542,15 +547,18 @@ function addMessage(text, role, data = null, totalCount = null) {
     }, 100);
 }
 
-function buildTable(data, totalCount) {
+function buildTable(data, totalCount, page = 1) {
     if (!Array.isArray(data) || data.length === 0) return null;
-    
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+
     const scrollDiv = document.createElement('div');
     scrollDiv.className = 'table-scroll';
-    
+
     const table = document.createElement('table');
     table.className = 'data-table';
-    
+
     // Headers
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -561,7 +569,7 @@ function buildTable(data, totalCount) {
     });
     thead.appendChild(headerRow);
     table.appendChild(thead);
-    
+
     // Body
     const tbody = document.createElement('tbody');
     data.forEach(row => {
@@ -574,18 +582,64 @@ function buildTable(data, totalCount) {
         tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    
+
     scrollDiv.appendChild(table);
-    
+    wrapper.appendChild(scrollDiv);
+
+    // Info + Pagination
     if (totalCount && totalCount > data.length) {
-        const moreDiv = document.createElement('div');
-        moreDiv.className = 'table-more';
-        moreDiv.textContent = `Menampilkan ${data.length} dari ${totalCount} data`;
-        scrollDiv.appendChild(moreDiv);
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'table-info';
+        infoDiv.textContent = `Menampilkan ${(page - 1) * pageSize + 1}–${(page - 1) * pageSize + data.length} dari ${totalCount} data`;
+        wrapper.appendChild(infoDiv);
+
+        const pagination = buildPagination(totalCount, page);
+        wrapper.appendChild(pagination);
     }
-    
-    return scrollDiv;
+
+    return wrapper;
 }
+
+function buildPagination(totalCount, page) {
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    const nav = document.createElement('div');
+    nav.className = 'pagination';
+
+    // Prev
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '« Prev';
+    prevBtn.disabled = page === 1;
+    prevBtn.onclick = () => changePage(page - 1);
+    nav.appendChild(prevBtn);
+
+    // Pages
+    for (let i = 1; i <= totalPages; i++) {
+        if (i > 5 && i < totalPages) continue; // biar nggak kepanjangan
+
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        btn.className = i === page ? 'active' : '';
+        btn.onclick = () => changePage(i);
+        nav.appendChild(btn);
+    }
+
+    // Next
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Next »';
+    nextBtn.disabled = page === totalPages;
+    nextBtn.onclick = () => changePage(page + 1);
+    nav.appendChild(nextBtn);
+
+    return nav;
+}
+
+function changePage(page) {
+    if (!lastQuery) return;
+    sendQuery(lastQuery, page);
+}
+
+
 
 function addTypingIndicator() {
     const messageEl = document.createElement('div');
@@ -658,7 +712,9 @@ function handleSend() {
     saveChatMessage(query, 'user');
     
     // Send to backend
-    sendQuery(query);
+    currentPage = 1;
+    sendQuery(query, 1);
+
 }
 
 function sendQuickAction(text) {
@@ -666,14 +722,16 @@ function sendQuickAction(text) {
     handleSend();
 }
 
-async function sendQuery(query) {
+async function sendQuery(query, page = 1) {
     isLoading = true;
     btnSend.disabled = true;
+    currentPage = page;
+    lastQuery = query;
 
     addTypingIndicator();
 
     try {
-        const response = await fetch(`/chat?query=${encodeURIComponent(query)}`);
+        const response = await fetch(`/chat?query=${encodeURIComponent(query)}&page=${page}&limit=${pageSize}`);
 
         if (!response.ok) {
             throw new Error('Network response was not ok');

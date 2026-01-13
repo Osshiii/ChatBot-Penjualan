@@ -81,29 +81,29 @@ def read_root():
 @app.get("/chat")
 def chat(
     query: str = Query(..., description="Natural language query"),
-    limit: int = Query(10, ge=1, le=50, description="Rows to show (detail only)"),
-    offset: int = Query(0, ge=0, description="Pagination offset (detail only)"),
+    limit: int = Query(10, ge=1, le=50),
+    page: int = Query(1, ge=1),
 ):
-    """
-    Chat endpoint: Process natural language queries using NLP and return results.
-    Adds limit/offset for detail queries, and returns a frontend-friendly JSON.
-    """
     try:
         bot_instance = get_bot()
 
+        offset = (page - 1) * limit
         query_with_paging = f"{query} limit {limit} offset {offset}"
+
         result = bot_instance.process_message(query_with_paging)
 
         result.setdefault("limit", limit)
         result.setdefault("offset", offset)
+        result.setdefault("page", page)
 
         return {
             "status": "success",
             "query": query,
-            **result,   # <-- flatten here
+            **result,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+
 
 @app.get("/help")
 def help_endpoint():
