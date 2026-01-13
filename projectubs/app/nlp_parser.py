@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Tuple
 
 class QueryType(str, Enum):
     HELP = "help"
+    GENERAL = "general"
     EXPLORATORY = "exploratory"
     SUMMARY = "summary"
     DETAIL = "detail"
@@ -25,6 +26,7 @@ class QueryType(str, Enum):
     EXACT_QUERY = "exact_query"
     COMPARATIVE = "comparative"
     LATEST_TRANSACTION = "latest_transaction"
+    SUGGESTION = "suggestion"
     UNKNOWN = "unknown"
 
     # backward compat alias (kalau ada code lama)
@@ -56,9 +58,24 @@ _MONTH_MAP = {
 HELP_KEYWORDS = {"bantuan", "help", "cara", "contoh", "panduan", "petunjuk"}
 COUNT_HINTS = {"baris", "row", "rows", "transaksi", "record", "data", "jumlah transaksi"}
 
+# General greeting/chit-chat keywords (no database needed)
+GENERAL_KEYWORDS = {
+    "halo", "hai", "hello", "hii", "hi", "pagi", "siang", "sore", "malam",
+    "apa kabar", "gimana kabar", "siapa nama kamu", "siapa kamu", "apa nama mu", 
+    "nama kamu siapa", "kamu siapa", "siapa nih", "kamu itu apa",
+    "bisa apa", "apa saja yang bisa", "apa yang bisa", "kemampuan mu",
+    "terima kasih", "thanks", "thank you", "makasih", "good day", "selamat",
+    "sampai jumpa", "bye", "dada", "see you", "assalamualaikum", "wassalam",
+    "apa yang sedang", "lagi apa", "sedang apa", "ok", "okay", "yes", "yap",
+    "oke", "okie", "siap", "bagus", "good", "baik", "mantap", "sip"
+}
+
 # Aggregation & Comparative keywords (future-ready)
 AGGREGATION_KEYWORDS = {"terbanyak", "paling", "terbesar", "tertinggi", "terendah", "rata-rata", "total", "sum", "count", "average", "avg", "top", "ranking", "urutan", "berapa total", "berapa banyak", "mana yang"}
 COMPARATIVE_KEYWORDS = {"perbandingan", "bandingkan", "dibanding", "dibandingkan", "mana lebih", "perbedaan", "difference", "compare"}
+
+# Suggestion keywords (saran bisnis)
+SUGGESTION_KEYWORDS = {"saran", "rekomendasi", "masukan", "usul", "suggestion", "recommend", "tips", "strategi", "cara terbaik", "yang sebaiknya", "bagaimana cara", "gimana cara"}
 
 # Latest transaction detection
 LATEST_KEYWORDS = {"terbaru", "latest", "terkini", "paling baru", "terakhir"}
@@ -334,12 +351,13 @@ class NLPParser:
         return {}
 
     def _detect_query_type(self, text: str, filters: Dict[str, Any], exploratory_intent: Dict[str, Any]) -> QueryType:
+        # === CHECK DATA-INTENT FIRST (higher priority) ===
         if any(k in text for k in HELP_KEYWORDS):
             return QueryType.HELP
 
-        ask_about = (exploratory_intent or {}).get("ask_about")
-        if ask_about:
-            return QueryType.EXPLORATORY
+        # === CHECK SUGGESTION (data-driven advice) ===
+        if any(k in text for k in SUGGESTION_KEYWORDS):
+            return QueryType.SUGGESTION
 
         # Check for latest transaction (\"transaksi terbaru\")
         if any(k in text for k in LATEST_KEYWORDS) and "transaksi" in text:
@@ -367,6 +385,14 @@ class NLPParser:
 
         if "per " in text or "berdasarkan" in text:
             return QueryType.SUMMARY
+
+        ask_about = (exploratory_intent or {}).get("ask_about")
+        if ask_about:
+            return QueryType.EXPLORATORY
+
+        # === CHECK GENERAL LAST (only if no data-intent detected) ===
+        if any(k in text for k in GENERAL_KEYWORDS):
+            return QueryType.GENERAL
 
         return QueryType.UNKNOWN
 

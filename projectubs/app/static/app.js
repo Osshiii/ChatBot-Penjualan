@@ -906,8 +906,9 @@ async function sendQuery(query, page = 1) {
         removeTypingIndicator();
 
         const text = result.message || 'Tidak ada jawaban.';
-        const data = result.data || null;
-        const totalCount = result.total_count || null;
+        // Only show data if show_data flag is true, otherwise pass null
+        const data = (result.show_data && result.data && result.data.length > 0) ? result.data : null;
+        const totalCount = (result.show_data) ? result.count : null;
 
         addMessage(text, 'assistant', data, totalCount);
         saveChatMessage(text, 'assistant', data, totalCount);
@@ -934,18 +935,22 @@ async function sendQueryUpdateBubble(query, page = 1) {
     const response = await fetch(`/chat?query=${encodeURIComponent(query)}&page=${page}&limit=${pageSize}`);
     const result = await response.json();
 
-    const data = result.data || null;
-    const totalCount = result.total_count || null;
+    // Only show data if show_data flag is true
+    const data = (result.show_data && result.data && result.data.length > 0) ? result.data : null;
+    const totalCount = (result.show_data) ? result.count : null;
 
     // cari table wrapper lama di bubble lama
     const oldTable = lastAssistantBubbleEl.querySelector('.table-wrapper');
 
-    // bikin table baru
+    // bikin table baru hanya jika ada data yang ditampilkan
     if (data && data.length > 0) {
       const newTable = buildTable(data, totalCount, page);
 
       if (oldTable) oldTable.replaceWith(newTable);
       else lastAssistantBubbleEl.appendChild(newTable);
+    } else if (oldTable) {
+      // Hapus table lama jika tidak ada data yang ditampilkan
+      oldTable.remove();
     }
 
   } catch (e) {

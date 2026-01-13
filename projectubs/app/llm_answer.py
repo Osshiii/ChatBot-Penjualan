@@ -102,6 +102,8 @@ Aturan ketat:
 4) Jangan gunakan simbol mata uang (contoh: Rp, $, dll).
 5) Satuan berat selalu gram (g). Jangan tulis kg.
 6) Output wajib pakai newline dan bullet '-' (jangan paragraf panjang).
+7) JANGAN GUNAKAN BOLD (**text**), ITALIC, atau MARKDOWN. Gunakan teks polos saja.
+8) Angka ribuan pakai separator dot (1.000), angka desimal pakai koma (102,5).
 """.strip()
 
     mode = (answer_mode or "auto").lower()
@@ -135,10 +137,36 @@ Insight:
 Kamu HANYA boleh mengeluarkan bagian "Saran lanjutan" saja.
 Dilarang menulis "Ringkasan" atau "Insight".
 
-Format WAJIB:
+ATURAN FORMAT WAJIB:
+1) Jangan gunakan bold (**text**), italic, atau markdown formatting lainnya.
+2) Gunakan teks polos saja.
+3) Pemisah baris pakai newline biasa, BUKAN tabel atau ASCII art.
+4) Angka harus menggunakan format:
+   - Ribuan: pakai titik separator (contoh: 1.000, 22.506)
+   - Desimal: pakai koma (contoh: 102,5 gram, 15,3%)
+5) Jangan tampilkan tabel detail/data raw kecuali user EKSPLISIT minta "tampilkan data" atau "lihat semua".
+
+PENTING - Cara kerja membuat SARAN SPESIFIK (bukan generik):
+1) Baca 'scope' di KPI: kalau "product" → saran strategi produk; kalau "location" → saran strategi lokasi
+2) Lihat 'total_transaksi' dan 'channel_dominan': fokus saran pada channel yang paling banyak transaksi
+3) Lihat 'tren_arah' (growing/declining): kalau tumbuh → pertahankan momentum; kalau menurun → beri strategi revitalisasi
+4) Lihat 'top_items' atau 'top_lokasi': WAJIB sebut produk/lokasi SPESIFIK (jangan "produk") dengan persentase
+5) LARANGAN: jangan beri saran generik seperti "tingkatkan stok", "buat promosi" tanpa DUKUNG dengan indikator KPI
+
+Contoh saran BENAR (spesifik dengan angka):
+- "Produk MP000197 berkontribusi 25,5% dari total transaksi dengan tren +15,3% → pertimbangkan bundling untuk meningkatkan AOV."
+- "Lokasi Jakarta mendominasi 40,2% transaksi via Tokopedia → optimalkan deskripsi produk di Tokopedia."
+
+Contoh saran SALAH (generik tanpa data):
+- "tingkatkan stok produk"
+- "buat promosi lebih besar"
+- "fokus pada pemasaran digital"
+
+TEMPLATE OUTPUT SARAN:
 Saran lanjutan:
-- <saran 1>
-- <saran 2>
+- <saran spesifik dengan KPI 1: ubah/tambah angka sesuai data>
+- <saran spesifik dengan KPI 2: ubah/tambah angka sesuai data>
+- <saran spesifik dengan KPI 3 atau action plan>
 """).strip()
 
     # fallback (sebaiknya tidak dipakai)
@@ -249,6 +277,38 @@ def generate_llm_answer(
             "total_berat_gram": round(total_berat_g, 3),
         }
         facts["top_kategori"] = top_rows
+
+    elif query_type == "suggestion":
+        # KPI-driven suggestion with detailed metrics
+        kpi_packet = response.get("kpi_packet", {})
+        scope = response.get("scope", "general")
+        
+        facts["kpi_analisis"] = {
+            "scope": scope,
+            "total_transaksi": kpi_packet.get("total_transactions", len(data)),
+            "total_unit": kpi_packet.get("unit_total", 0),
+            "total_berat_gram": kpi_packet.get("weight_total_g", 0),
+            "channel_dominan": kpi_packet.get("dominant_channel"),
+            "channel_dominan_pct": kpi_packet.get("dominant_channel_pct", 0),
+            "tren_vs_sebelumnya_pct": kpi_packet.get("trend_vs_previous", 0),
+            "tren_arah": kpi_packet.get("trend_direction", "stable"),
+            "tren_tumbuh": kpi_packet.get("trend_growth", False),
+            "top_items": kpi_packet.get("top_items", [])[:3],
+            "top_lokasi": kpi_packet.get("top_locations", [])[:3],
+            "periode_cakupan": kpi_packet.get("period_coverage", {})
+        }
+        
+        # Include sample rows for reference ONLY if user didn't request data
+        show_data = response.get("show_data", False)
+        if not show_data:
+            # Don't include raw data rows - LLM should focus on analysis only
+            facts["catatan"] = "User hanya minta saran, bukan data. Jangan tampilkan tabel atau list data raw."
+        else:
+            cols = ["TANGGAL", "KODE_BARANG", "LOKASI", "CHANNEL", "JUMLAH", "BERAT_TOTAL"]
+            sample_rows = [_pick(r, cols) for r in data[: max(0, sample_n)]]
+            facts["contoh_baris_transaksi"] = sample_rows
+        
+        # NOTE: Continue to prompt generation below (don't return early)
 
     else:
         return response.get("message", "")

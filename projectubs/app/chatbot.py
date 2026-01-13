@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Chatbot Module for Jewelry Sales AI Assistant
-- Conversation logic + query processing + DB access
-- Supports: help, exploratory, detail (rows), summary (aggregate), count
+- Intent classification: GENERAL (chit-chat), SUMMARY (aggregates), DETAIL (rows), SUGGESTION (advice)
+- GENERAL: No database query, LLM-only natural response
+- SUMMARY/SUGGESTION: Database query first, then LLM insight/advice
+- Supports: help, exploratory, detail (rows), summary (aggregate), count, suggestion
 - Fix: relative time ("bulan ini", "bulan lalu", "tahun ini") based on latest data in DB
-- Optional: LLM rewrite (USE_LLM=1) for detail/summary responses
+- Optional: LLM rewrite (USE_LLM=1) for detail/summary/suggestion responses
 - NEW: answer_mode -> ringkasan / insight / saran (output dipisah, tidak digabung)
 """
 
@@ -34,6 +36,66 @@ def env_bool(name: str, default: bool = False) -> bool:
     if v is None:
         return default
     return v.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -> str:
+    """
+    Format number with proper Indonesian/European locale separators.
+    - Thousands: dot (1.234)
+    - Decimal: comma (1,5)
+    """
+    if value is None:
+        return "0"
+    
+    try:
+        val = float(value)
+        
+        if decimals == 0:
+            # No decimals - just format with thousands separator
+            if thousands_sep:
+                # Format as integer with thousands
+                int_val = int(round(val))
+                str_val = str(int_val)
+                # Add dots for thousands
+                parts = []
+                for i, digit in enumerate(reversed(str_val)):
+                    if i > 0 and i % 3 == 0:
+                        parts.append('.')
+                    parts.append(digit)
+                return ''.join(reversed(parts))
+            else:
+                return str(int(round(val)))
+        else:
+            # With decimals
+            if thousands_sep:
+                # Split by decimal point
+                formatted = f"{val:.{decimals}f}"  # Use dot for decimal
+                int_part, dec_part = formatted.split('.')
+                
+                # Add dots to integer part for thousands
+                parts = []
+                for i, digit in enumerate(reversed(int_part)):
+                    if i > 0 and i % 3 == 0:
+                        parts.append('.')
+                    parts.append(digit)
+                int_formatted = ''.join(reversed(parts))
+                
+                # Return with comma as decimal separator
+                return f"{int_formatted},{dec_part}"
+            else:
+                # No thousands separator, just replace decimal separator
+                return f"{val:.{decimals}f}".replace('.', ',')
+    
+    except (ValueError, TypeError):
+        return str(value)
+
+
+def format_percentage(value: float, decimals: int = 1) -> str:
+    """Format percentage with proper separator."""
+    try:
+        return f"{float(value):.{decimals}f}%".replace('.', ',')
+    except (ValueError, TypeError):
+        return f"{value}%"
 
 
 # ============================================================
@@ -231,6 +293,18 @@ class JewelrySalesBot:
         self.debug = env_bool("DEBUG", False)
 
     def process_message(self, user_message: str, limit: int = 10, offset: int = 0) -> Dict[str, Any]:
+        """
+        Process user message with intent-based routing:
+        
+        FLOW:
+        1. Parse intent (GENERAL, SUMMARY/INSIGHT, SUGGESTION, DETAIL, etc.)
+        2. Route based on intent:
+           - GENERAL (greeting/chit-chat): LLM only, NO database query
+           - SUMMARY/INSIGHT: Query database → aggregate → LLM insight
+           - SUGGESTION: Query database → analyze → LLM business advice
+           - DETAIL: Query database → return rows with pagination
+        3. Optional LLM rewrite for better formatting
+        """
         self.conversation_history.append({
             "timestamp": datetime.now().isoformat(),
             "role": "user",
@@ -239,12 +313,6 @@ class JewelrySalesBot:
 
         parsed_query = self.parser.parse(user_message)
         
-        # Inject pagination params directly into filters (bypass NLP parsing)
-        if "filters" not in parsed_query:
-            parsed_query["filters"] = {}
-        parsed_query["filters"]["limit"] = limit
-        parsed_query["filters"]["offset"] = offset
-
         if parsed_query.get("error"):
             return {
                 "query_type": "error",
@@ -260,14 +328,23 @@ class JewelrySalesBot:
             print(f"[DEBUG] User: {user_message}")
             print(f"[DEBUG] Type: {parsed_query['query_type']}")
             print(f"[DEBUG] AnswerMode: {parsed_query.get('answer_mode')}")
-            print(f"[DEBUG] Filters: {parsed_query.get('filters', {})}")
-            print(f"[DEBUG] Group: {parsed_query.get('group_by')}")
             print(f"[DEBUG] Confidence: {parsed_query.get('confidence', 0):.2f}")
 
         qt = parsed_query["query_type"]
 
-        if qt == QueryType.HELP:
+        # === GENERAL: No database query, LLM answer only ===
+        if qt == QueryType.GENERAL:
+            response = self._handle_general_query(user_message)
+        # === DATA-DRIVEN HANDLERS ===
+        elif qt == QueryType.HELP:
             response = self._handle_help_query()
+        elif qt == QueryType.SUGGESTION:
+            # Inject pagination for suggestion context
+            if "filters" not in parsed_query:
+                parsed_query["filters"] = {}
+            parsed_query["filters"]["limit"] = limit
+            parsed_query["filters"]["offset"] = offset
+            response = self._handle_suggestion_query(parsed_query)
         elif qt == QueryType.LATEST_TRANSACTION:
             response = self._handle_latest_transaction_query(parsed_query)
         elif qt == QueryType.EXACT_QUERY:
@@ -275,6 +352,11 @@ class JewelrySalesBot:
         elif qt == QueryType.COMPARATIVE:
             response = self._handle_comparative_query(parsed_query)
         elif qt == QueryType.DETAIL:
+            # Inject pagination params directly into filters (bypass NLP parsing)
+            if "filters" not in parsed_query:
+                parsed_query["filters"] = {}
+            parsed_query["filters"]["limit"] = limit
+            parsed_query["filters"]["offset"] = offset
             response = self._handle_detail_query(parsed_query)
         elif qt == QueryType.COUNT:
             response = self._handle_count_query(parsed_query)
@@ -1288,6 +1370,7 @@ class JewelrySalesBot:
             return response
 
         qtype = (response.get("query_type") or "").lower()
+        # Skip LLM rewrite for GENERAL (already has LLM response) dan SUGGESTION (already has LLM response)
         if qtype not in ("detail", "summary"):
             return response
 
@@ -1567,6 +1650,398 @@ class JewelrySalesBot:
             "data": res,
             "confidence": 0.95,
         }
+
+    def _handle_general_query(self, user_message: str) -> Dict[str, Any]:
+        """
+        Handle general chit-chat and greetings without database query.
+        Use LLM to generate natural, contextual responses.
+        """
+        context = f"Anda adalah asisten chatbot penjualan perhiasan yang ramah dan profesional."
+        
+        llm_answer = None
+        if generate_llm_answer:
+            try:
+                llm_answer = generate_llm_answer(
+                    user_message=user_message,
+                    context=context,
+                    data_summary="",
+                    answer_mode="natural"
+                )
+            except (LLMUnavailable, Exception):
+                llm_answer = None
+        
+        if llm_answer:
+            return {
+                "query_type": "general",
+                "message": llm_answer,
+                "data": [],
+                "confidence": 0.9,
+            }
+        
+        # Fallback jika LLM tidak tersedia
+        fallback_responses = {
+            "halo": "Halo! 👋 Ada yang bisa saya bantu tentang penjualan perhiasan?",
+            "hai": "Hai! 😊 Silakan tanya tentang data penjualan Anda.",
+            "apa kabar": "Saya baik-baik saja! Bagaimana dengan Anda? Ada pertanyaan tentang penjualan?",
+            "bisa apa": "Saya bisa membantu Anda dengan:\n- 📊 Ringkasan penjualan\n- 📈 Analisis per lokasi/produk\n- 💡 Saran strategi penjualan\n- 🔍 Pencarian data spesifik",
+            "siapa kamu": "Saya adalah asisten AI untuk analisis penjualan perhiasan. Saya siap membantu Anda menganalisis data dan memberikan insight bisnis!",
+        }
+        
+        normalized = (user_message or "").lower().strip()
+        for key, resp in fallback_responses.items():
+            if key in normalized:
+                return {
+                    "query_type": "general",
+                    "message": resp,
+                    "data": [],
+                    "confidence": 0.85,
+                }
+        
+        return {
+            "query_type": "general",
+            "message": "Terima kasih atas pesan Anda! 😊 Silakan tanya tentang data penjualan perhiasan Anda.",
+            "data": [],
+            "confidence": 0.75,
+        }
+
+    def _handle_suggestion_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle suggestion/recommendation requests with KPI-driven analysis.
+        Generates context-specific recommendations based on multiple metrics.
+        """
+        filters = (parsed_query.get("filters") or {}).copy()
+        confidence = parsed_query.get("confidence", 0.0)
+        user_message = parsed_query.get("original", "")
+        
+        # Determine if user explicitly asked to display data
+        # Check for keywords: "tampilkan", "lihat", "tunjukkan", "semua", "seluruh", "lengkap", "data"
+        user_msg_lower = user_message.lower()
+        show_all_data = any(word in user_msg_lower for word in [
+            "tampilkan", "lihat", "tunjukkan", "tampil", 
+            "semua", "seluruh", "lengkap", "all", 
+            "data", "tabel", "table"
+        ])
+        
+        # Extract pagination parameters
+        display_limit = int(filters.pop("limit", 10) or 10)
+        display_offset = int(filters.pop("offset", 0) or 0)
+        
+        # Determine query limit based on show_all_data
+        # For KPI analysis, we need all data
+        # For display, we show 10 per page (pagination handled by display_limit/display_offset)
+        if show_all_data:
+            # Query ALL data for complete KPI analysis
+            query_limit = 9999999  # No practical limit
+            query_offset = 0
+        else:
+            # Query only what's needed
+            query_limit = min(display_limit, 100)
+            query_offset = display_offset
+        
+        # Detect scope: product-specific, location-specific, or general
+        has_kode_barang = "kode_barang" in filters
+        has_lokasi = "lokasi" in filters
+        scope = "product" if has_kode_barang else ("location" if has_lokasi else "general")
+        
+        # Check if data exists
+        count_sql, count_params = SalesQueryBuilder.build_count_query(filters)
+        count_result = self.db.execute_query(count_sql, tuple(count_params))
+        total_records = int(count_result[0].get("total", 0)) if count_result else 0
+        
+        if total_records == 0:
+            filter_desc = self._describe_filters(filters)
+            return {
+                "query_type": "suggestion",
+                "message": f"❌ Tidak ada data {filter_desc} untuk memberikan saran.",
+                "data": [],
+                "confidence": confidence,
+            }
+        
+        # Get data for KPI analysis and display
+        detail_sql, detail_params = SalesQueryBuilder.build_detail_query(filters, limit=query_limit, offset=query_offset)
+        results = self.db.execute_query(detail_sql, tuple(detail_params))
+        
+        # If show_all_data, extract paginated results for display (10 per page)
+        # But keep all results for KPI analysis
+        if show_all_data:
+            # results contains ALL data, now paginate for display
+            all_results_for_kpi = results.copy()
+            display_data = results[display_offset:display_offset + display_limit]
+        else:
+            all_results_for_kpi = results
+            display_data = results
+        
+        # Calculate KPI packet based on scope - use ALL data for accurate analysis
+        kpi_packet = self._calculate_kpi_packet_for_suggestion(
+            results=all_results_for_kpi,
+            filters=filters,
+            total_records=total_records,
+            scope=scope
+        )
+                
+        # Get LLM answer with KPI context
+        llm_answer = None
+        if generate_llm_answer:
+            try:
+                llm_answer = generate_llm_answer(
+                    user_message=user_message,
+                    parsed_query={"filters": filters, "confidence": confidence},
+                    response={
+                        "query_type": "suggestion",
+                        "data": all_results_for_kpi,
+                        "count": total_records,
+                        "filters": filters,
+                        "confidence": confidence,
+                        "kpi_packet": kpi_packet,
+                        "scope": scope,
+                        "show_data": show_all_data
+                    },
+                    answer_mode="saran"
+                )
+            except (LLMUnavailable, Exception):
+                llm_answer = None
+        
+        # Fallback message if LLM not available
+        if not llm_answer:
+            llm_answer = self._fallback_suggestion_message(kpi_packet, scope)
+        
+        # Return: data untuk display (sudah paginated if show_all_data), total_count untuk pagination UI
+        return_data = display_data if show_all_data else []
+        
+        return {
+            "query_type": "suggestion",
+            "message": llm_answer,
+            "data": return_data,
+            "filters": filters,
+            "confidence": confidence,
+            "count": total_records,  # Total count for pagination
+            "displayed": len(return_data),
+            "scope": scope,
+            "kpi_analysis": kpi_packet,
+            "show_data": show_all_data
+        }
+
+
+    def _build_data_summary_for_llm(self, results: List[Dict[str, Any]], filters: Dict[str, Any], total_count: int) -> str:
+        """Build a summary of data for LLM context."""
+        if not results:
+            return f"Tidak ada data untuk filter: {filters}"
+        
+        summary = f"Total records: {total_count}\n"
+        summary += f"Menampilkan: {len(results)} data teratas\n"
+        summary += f"Filters: {filters}\n\n"
+        summary += "Sample data:\n"
+        
+        for i, row in enumerate(results[:5], 1):
+            summary += f"{i}. {dict(row)}\n"
+        
+        return summary
+
+    def _calculate_kpi_packet_for_suggestion(self, results: List[Dict[str, Any]], filters: Dict[str, Any], total_records: int, scope: str) -> Dict[str, Any]:
+        """
+        Calculate comprehensive KPI packet for suggestion generation.
+        Includes transaction count, trend, contribution %, and channel analysis.
+        """
+        kpi_packet = {
+            "scope": scope,
+            "total_transactions": total_records,
+            "period_coverage": self._detect_period_from_results(results),
+            "transaction_count": total_records,
+            "unit_total": 0,
+            "weight_total_g": 0,
+            "channels": {},
+            "top_items": [],
+            "trend_vs_previous": 0,  # percentage
+            "contribution_pct": 0,
+            "dominant_channel": None,
+        }
+        
+        if not results:
+            return kpi_packet
+        
+        # Calculate basic metrics
+        unit_total = 0
+        weight_total = 0
+        channels_dict = {}
+        
+        for row in results:
+            try:
+                unit_total += float(row.get("JUMLAH", 0) or 0)
+                weight_total += float(row.get("BERAT_TOTAL", 0) or 0)
+                channel = row.get("CHANNEL", "Unknown")
+                if channel not in channels_dict:
+                    channels_dict[channel] = 0
+                channels_dict[channel] += 1
+            except (ValueError, TypeError):
+                pass
+        
+        kpi_packet["unit_total"] = round(unit_total, 2)
+        kpi_packet["weight_total_g"] = round(weight_total, 2)
+        kpi_packet["channels"] = channels_dict
+        
+        # Determine dominant channel
+        if channels_dict:
+            dominant_channel = max(channels_dict.items(), key=lambda x: x[1])
+            kpi_packet["dominant_channel"] = dominant_channel[0]
+            kpi_packet["dominant_channel_count"] = dominant_channel[1]
+            kpi_packet["dominant_channel_pct"] = round((dominant_channel[1] / total_records) * 100, 1)
+        
+        # Extract top items by frequency
+        item_counts = {}
+        location_counts = {}
+        for row in results:
+            kode = row.get("KODE_BARANG")
+            lokasi = row.get("LOKASI")
+            if kode:
+                item_counts[kode] = item_counts.get(kode, 0) + 1
+            if lokasi:
+                location_counts[lokasi] = location_counts.get(lokasi, 0) + 1
+        
+        # Sort top items/locations
+        top_items_list = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_locations_list = sorted(location_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        kpi_packet["top_items"] = [{"kode_barang": k, "count": v, "pct": round((v/total_records)*100, 1)} for k, v in top_items_list]
+        kpi_packet["top_locations"] = [{"lokasi": k, "count": v, "pct": round((v/total_records)*100, 1)} for k, v in top_locations_list]
+        
+        # Calculate trend (simplified: compare first half vs second half of period)
+        trend = self._calculate_trend_analysis(results)
+        kpi_packet["trend_vs_previous"] = trend["change_pct"]
+        kpi_packet["trend_direction"] = trend["direction"]
+        kpi_packet["trend_growth"] = trend["is_growing"]
+        
+        return kpi_packet
+
+    def _detect_period_from_results(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Detect date/period range from result set."""
+        if not results:
+            return {"start": None, "end": None, "days": 0}
+        
+        dates = []
+        for row in results:
+            tanggal = row.get("TANGGAL")
+            if tanggal:
+                dates.append(str(tanggal))
+        
+        if not dates:
+            return {"start": None, "end": None, "days": 0}
+        
+        dates_sorted = sorted(dates)
+        return {
+            "start": dates_sorted[0],
+            "end": dates_sorted[-1],
+            "days": len(set(dates_sorted))
+        }
+
+    def _calculate_trend_analysis(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Calculate trend by comparing first half vs second half of transactions.
+        Returns change percentage and direction.
+        """
+        if len(results) < 2:
+            return {"change_pct": 0, "direction": "stable", "is_growing": False}
+        
+        mid = len(results) // 2
+        first_half = results[:mid]
+        second_half = results[mid:]
+        
+        # Sum weights for comparison
+        first_half_weight = sum(float(r.get("BERAT_TOTAL", 0) or 0) for r in first_half)
+        second_half_weight = sum(float(r.get("BERAT_TOTAL", 0) or 0) for r in second_half)
+        
+        if first_half_weight == 0:
+            return {"change_pct": 0, "direction": "new", "is_growing": True}
+        
+        change_pct = ((second_half_weight - first_half_weight) / first_half_weight) * 100
+        
+        direction = "growing" if change_pct > 5 else ("declining" if change_pct < -5 else "stable")
+        is_growing = change_pct > 0
+        
+        return {
+            "change_pct": round(change_pct, 1),
+            "direction": direction,
+            "is_growing": is_growing
+        }
+
+    def _fallback_suggestion_message(self, kpi_packet: Dict[str, Any], scope: str) -> str:
+        """
+        Generate fallback suggestion message when LLM is unavailable.
+        Uses KPI data to provide specific recommendations.
+        Format: Plain text with proper sentence structure, no bullet points.
+        """
+        scope_label = {
+            "product": "Produk",
+            "location": "Lokasi",
+            "general": "Penjualan"
+        }.get(scope, "Data")
+        
+        # Header
+        lines = []
+        lines.append("Saran Berdasarkan Analisis Data")
+        lines.append("")
+        
+        # KPI Summary - aligned format
+        total_transaksi = format_number(kpi_packet['total_transactions'], decimals=0, thousands_sep=True)
+        total_berat = format_number(kpi_packet['weight_total_g'], decimals=1, thousands_sep=False)
+        
+        lines.append(f"Scope           : {scope_label}")
+        lines.append(f"Total Transaksi : {total_transaksi}")
+        lines.append(f"Total Berat     : {total_berat} g")
+        
+        # Channel info if available
+        if kpi_packet.get("dominant_channel"):
+            channel_name = str(kpi_packet['dominant_channel'])
+            channel_pct = format_percentage(kpi_packet.get('dominant_channel_pct', 0), decimals=1)
+            lines.append(f"Channel Dominan : {channel_name} ({channel_pct})")
+        
+        lines.append("")
+        lines.append("Analisis dan Rekomendasi:")
+        lines.append("")
+        
+        # Scope-specific recommendations with full sentence structure
+        if scope == "product":
+            top_item = kpi_packet['top_items'][0] if kpi_packet['top_items'] else None
+            if top_item:
+                item_pct = format_percentage(top_item['pct'], decimals=1)
+                lines.append(f"Berdasarkan data, produk {top_item['kode_barang']} memiliki kontribusi sebesar {item_pct} dari total transaksi yang terjadi. Produk ini menunjukkan peran penting dalam portofolio penjualan Anda.")
+            
+            trend_pct = format_percentage(abs(kpi_packet['trend_vs_previous']), decimals=1)
+            if kpi_packet.get('trend_growth'):
+                lines.append(f"Tren penjualan menunjukkan peningkatan sebesar {trend_pct} dibandingkan dengan periode sebelumnya. Hal ini merupakan sinyal positif yang menunjukkan akselerasi penjualan. Disarankan untuk mempertahankan momentum ini dengan menjaga konsistensi stok, memperkuat promosi, dan memastikan kepuasan pelanggan tetap tinggi.")
+            else:
+                lines.append(f"Tren penjualan mengalami penurunan sebesar {trend_pct} dibandingkan dengan periode sebelumnya. Kondisi ini memerlukan perhatian khusus untuk dapat memulihkan performa produk. Beberapa strategi yang dapat dipertimbangkan adalah revitalisasi produk melalui desain atau fitur baru, melakukan bundling dengan produk lainnya, menyesuaikan strategi pemasaran, atau melakukan analisis mendalam tentang preferensi pasar saat ini.")
+            
+            lines.append(f"Pastikan strategi pemasaran disesuaikan dengan kondisi pasar terkini dan feedback dari pelanggan untuk hasil yang optimal.")
+        
+        elif scope == "location":
+            top_loc = kpi_packet['top_locations'][0] if kpi_packet['top_locations'] else None
+            if top_loc:
+                loc_pct = format_percentage(top_loc['pct'], decimals=1)
+                lines.append(f"Lokasi {top_loc['lokasi']} menunjukkan performa terbaik dengan kontribusi sebesar {loc_pct} dari total transaksi. Wilayah ini dapat dijadikan sebagai fokus utama pengembangan bisnis dan ekspansi lebih lanjut.")
+            
+            channel_name = str(kpi_packet.get('dominant_channel', 'N/A'))
+            channel_pct = format_percentage(kpi_packet.get('dominant_channel_pct', 0), decimals=1)
+            lines.append(f"Channel {channel_name} menunjukkan dominansi dengan {channel_pct} dari total transaksi di region ini. Ini menunjukkan preferensi pelanggan yang kuat terhadap channel penjualan tersebut.")
+            
+            lines.append(f"Untuk meningkatkan performa, optimalisasikan mix produk lokal sesuai dengan preferensi channel yang dominan. Pertimbangkan juga untuk melakukan inisiatif promosi khusus yang disesuaikan dengan karakteristik unik setiap lokasi dan channel.")
+        
+        else:  # general scope
+            description_items = []
+            if kpi_packet['top_items']:
+                top_3_items = kpi_packet['top_items'][:3]
+                item_list = ", ".join([f"{item['kode_barang']} ({format_percentage(item['pct'], 1)})" for item in top_3_items])
+                description_items.append(f"Produk unggulan saat ini adalah {item_list}, yang bersama-sama menunjukkan momentum penjualan terkuat")
+            
+            unit_total = format_number(kpi_packet['unit_total'], decimals=0, thousands_sep=True)
+            description_items.append(f"total volume penjualan mencapai {unit_total} unit")
+            
+            channel_name = str(kpi_packet.get('dominant_channel', 'channel'))
+            description_items.append(f"channel {channel_name} menunjukkan dominansi dalam penjualan")
+            
+            combined_desc = ", ".join(description_items)
+            lines.append(f"Secara keseluruhan, {combined_desc}. Untuk mempercepat pertumbuhan, manfaatkan potensi channel dan produk unggulan ini sebagai fokus utama strategi ekspansi penjualan ke depan.")
+        
+        return "\n".join(lines)
 
     def _handle_help_query(self) -> Dict[str, Any]:
         message = (
