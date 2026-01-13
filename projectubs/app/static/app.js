@@ -15,6 +15,15 @@ let isLoading = false;
 let currentChatId = null;
 let chatHistory = [];
 
+// Delete confirmation state
+let deleteConfirmState = {
+    isConfirmOpen: false,
+    isDeleting: false,
+    chatIdToDelete: null,
+    deleteStatus: 'idle', // 'idle' | 'success' | 'error'
+    deleteErrorMessage: null
+};
+
 // ==================== INITIALIZATION ====================
 function initApp() {
     console.log('🚀 Initializing Jewelry Sales Chatbot...');
@@ -36,6 +45,25 @@ function attachEventListeners() {
     btnSend?.addEventListener('click', handleSend);
     inputMessage?.addEventListener('keydown', handleInputKeydown);
     inputMessage?.addEventListener('input', autoResizeTextarea);
+    
+    // Delete modal listeners
+    const deleteModalOverlay = document.getElementById('deleteModalOverlay');
+    const deleteConfirmModal = document.getElementById('deleteConfirmModal');
+    const deleteModalClose = document.getElementById('deleteModalClose');
+    const deleteModalCancel = document.getElementById('deleteModalCancel');
+    const deleteModalConfirm = document.getElementById('deleteModalConfirm');
+    
+    deleteModalOverlay?.addEventListener('click', closeDeleteModal);
+    deleteModalClose?.addEventListener('click', closeDeleteModal);
+    deleteModalCancel?.addEventListener('click', closeDeleteModal);
+    deleteModalConfirm?.addEventListener('click', handleDeleteConfirm);
+    
+    // ESC key to close modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && deleteConfirmState.isConfirmOpen) {
+            closeDeleteModal();
+        }
+    });
 }
 
 // Initialize on load
@@ -232,18 +260,198 @@ function renameChat(chatId) {
 }
 
 function deleteChat(chatId) {
-    if (!confirm('Hapus riwayat chat ini?')) return;
+    console.log('🗑️ deleteChat called with chatId:', chatId);
+    deleteConfirmState.isConfirmOpen = true;
+    deleteConfirmState.chatIdToDelete = chatId;
+    deleteConfirmState.deleteStatus = 'idle';
+    deleteConfirmState.deleteErrorMessage = null;
     
-    chatHistory = chatHistory.filter(c => c.id !== chatId);
+    openDeleteModal();
+}
+
+function openDeleteModal() {
+    console.log('📂 openDeleteModal called');
+    const modal = document.getElementById('deleteConfirmModal');
+    const overlay = document.getElementById('deleteModalOverlay');
+    const confirmBtn = document.getElementById('deleteModalConfirm');
+    const errorDiv = document.getElementById('deleteErrorMessage');
     
-    if (currentChatId === chatId) {
-        currentChatId = null;
-        messagesWrapper.innerHTML = '';
-        showEmptyState();
+    console.log('Modal element:', modal);
+    console.log('Overlay element:', overlay);
+    
+    if (modal && overlay) {
+        modal.style.display = 'block';
+        overlay.style.display = 'block';
+        errorDiv.style.display = 'none';
+        confirmBtn.disabled = false;
+        
+        // Focus confirm button
+        confirmBtn.focus();
+        
+        // Prevent body scroll
+        document.body.style.overflow = 'hidden';
+        console.log('✅ Modal opened successfully');
+    } else {
+        console.error('❌ Modal or overlay element not found');
+    }
+}
+
+function closeDeleteModal() {
+    console.log('🚪 closeDeleteModal called');
+    const modal = document.getElementById('deleteConfirmModal');
+    const overlay = document.getElementById('deleteModalOverlay');
+    
+    if (modal && overlay) {
+        modal.style.display = 'none';
+        overlay.style.display = 'none';
+        deleteConfirmState.isConfirmOpen = false;
+        deleteConfirmState.chatIdToDelete = null;
+        deleteConfirmState.deleteStatus = 'idle';
+        deleteConfirmState.deleteErrorMessage = null;
+        
+        // Restore body scroll
+        document.body.style.overflow = '';
+        console.log('✅ Modal closed and state reset');
+    } else {
+        console.error('❌ Modal or overlay element not found');
+    }
+}
+
+async function handleDeleteConfirm() {
+    console.log('✋ handleDeleteConfirm called, isDeleting:', deleteConfirmState.isDeleting);
+    const chatId = deleteConfirmState.chatIdToDelete;
+    if (!chatId) {
+        console.error('No chat ID to delete');
+        return;
     }
     
-    saveChatHistory();
-    renderChatHistory();
+    // Guard: prevent double-click
+    if (deleteConfirmState.isDeleting) {
+        console.warn('⚠️ Already deleting, ignoring duplicate click');
+        return;
+    }
+    
+    deleteConfirmState.isDeleting = true;
+    console.log('🔒 Set isDeleting = true, protecting against double-click');
+    
+    const confirmBtn = document.getElementById('deleteModalConfirm');
+    const cancelBtn = document.getElementById('deleteModalCancel');
+    const btnText = confirmBtn.querySelector('.btn-text');
+    const btnLoader = confirmBtn.querySelector('.btn-loader');
+    const errorDiv = document.getElementById('deleteErrorMessage');
+    
+    try {
+        console.log('⏳ Starting deletion of chat:', chatId);
+        
+        // Show loading state
+        confirmBtn.disabled = true;
+        cancelBtn.disabled = true;
+        btnText.style.display = 'none';
+        btnLoader.style.display = 'inline';
+        errorDiv.style.display = 'none';
+        console.log('🔄 Loading state shown on buttons');
+        
+        // Delete from localStorage (synchronous operation)
+        chatHistory = chatHistory.filter(c => c.id !== chatId);
+        console.log('🗑️ Chat deleted from array, remaining:', chatHistory.length);
+        
+        // Reset current chat if it was deleted
+        if (currentChatId === chatId) {
+            currentChatId = null;
+            messagesWrapper.innerHTML = '';
+            showEmptyState();
+            console.log('📭 Current chat was deleted, showing empty state');
+        }
+        
+        // Persist to storage
+        saveChatHistory();
+        renderChatHistory();
+        console.log('💾 Chat history saved and re-rendered');
+        
+        // Close modal first
+        const modal = document.getElementById('deleteConfirmModal');
+        const overlay = document.getElementById('deleteModalOverlay');
+        if (modal && overlay) {
+            modal.style.display = 'none';
+            overlay.style.display = 'none';
+            console.log('✅ Modal and overlay hidden');
+        }
+        
+        // Reset modal state
+        deleteConfirmState.isConfirmOpen = false;
+        deleteConfirmState.deleteStatus = 'success';
+        console.log('✅ Modal state reset to closed');
+        
+        // Show success toast
+        console.log('🎉 Calling showDeleteSuccess()');
+        showDeleteSuccess();
+        
+    } catch (error) {
+        console.error('❌ Error during deletion:', error);
+        deleteConfirmState.deleteStatus = 'error';
+        deleteConfirmState.deleteErrorMessage = error.message || 'Gagal menghapus riwayat chat';
+        
+        // Show error in modal
+        errorDiv.textContent = deleteConfirmState.deleteErrorMessage;
+        errorDiv.style.display = 'block';
+        console.log('⚠️ Error displayed in modal');
+        
+        // Show error toast
+        showToast(deleteConfirmState.deleteErrorMessage, 'error', 5000);
+        
+    } finally {
+        // ALWAYS reset button state (whether success or error)
+        console.log('🔓 finally block: resetting button state...');
+        deleteConfirmState.isDeleting = false;
+        
+        // Restore buttons to normal state
+        if (deleteConfirmState.deleteStatus !== 'success') {
+            confirmBtn.disabled = false;
+            cancelBtn.disabled = false;
+            btnText.style.display = 'inline';
+            btnLoader.style.display = 'none';
+            console.log('🔘 Buttons enabled (for retry)');
+        } else {
+            // Success case: keep buttons disabled until modal fully closed
+            console.log('✨ Success case: buttons stay disabled, modal is closed');
+        }
+    }
+}
+
+function showDeleteSuccess() {
+    showToast('Berhasil dihapus', 'success', 3000);
+}
+
+function showToast(message, type = 'info', duration = 3000) {
+    console.log('🍞 showToast called:', message, type);
+    const container = document.getElementById('toastContainer');
+    if (!container) {
+        console.error('❌ Toast container not found');
+        return;
+    }
+    
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toast.role = 'status';
+    toast.setAttribute('aria-live', 'polite');
+    
+    container.appendChild(toast);
+    console.log('✅ Toast element created and appended');
+    
+    // Trigger animation
+    setTimeout(() => {
+        toast.classList.add('show');
+        console.log('Animation triggered');
+    }, 10);
+    
+    // Remove after duration
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, duration);
 }
 
 function getCurrentChat() {

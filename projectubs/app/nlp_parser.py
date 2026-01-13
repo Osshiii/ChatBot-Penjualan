@@ -22,6 +22,9 @@ class QueryType(str, Enum):
     SUMMARY = "summary"
     DETAIL = "detail"
     COUNT = "count"
+    EXACT_QUERY = "exact_query"
+    COMPARATIVE = "comparative"
+    LATEST_TRANSACTION = "latest_transaction"
     UNKNOWN = "unknown"
 
     # backward compat alias (kalau ada code lama)
@@ -52,6 +55,16 @@ _MONTH_MAP = {
 
 HELP_KEYWORDS = {"bantuan", "help", "cara", "contoh", "panduan", "petunjuk"}
 COUNT_HINTS = {"baris", "row", "rows", "transaksi", "record", "data", "jumlah transaksi"}
+
+# Aggregation & Comparative keywords (future-ready)
+AGGREGATION_KEYWORDS = {"terbanyak", "paling", "terbesar", "tertinggi", "terendah", "rata-rata", "total", "sum", "count", "average", "avg", "top", "ranking", "urutan", "berapa total", "berapa banyak", "mana yang"}
+COMPARATIVE_KEYWORDS = {"perbandingan", "bandingkan", "dibanding", "dibandingkan", "mana lebih", "perbedaan", "difference", "compare"}
+
+# Latest transaction detection
+LATEST_KEYWORDS = {"terbaru", "latest", "terkini", "paling baru", "terakhir"}
+
+# Exact query keywords (specific column/date requests)
+EXACT_QUERY_KEYWORDS = {"bulan apa", "tahun berapa", "tanggal berapa", "kapan", "pada tanggal", "pada bulan", "barang apa", "produk apa", "apa yang", "daftar", "sebutkan"}
 
 EXPLORATORY_RULES = [
     (r"(kode barang|kode produk|produk)\s*(apa saja|yang ada|tersedia|daftar|list)", "available_codes"),
@@ -328,13 +341,28 @@ class NLPParser:
         if ask_about:
             return QueryType.EXPLORATORY
 
+        # Check for latest transaction (\"transaksi terbaru\")
+        if any(k in text for k in LATEST_KEYWORDS) and "transaksi" in text:
+            return QueryType.LATEST_TRANSACTION
+
+        # Check for comparative/aggregation queries (future-ready, no calculation)
+        has_agg = any(k in text for k in AGGREGATION_KEYWORDS)
+        has_comp = any(k in text for k in COMPARATIVE_KEYWORDS)
+        if has_agg or has_comp:
+            return QueryType.COMPARATIVE
+
+        # Check for exact queries (specific column/date requests)
+        has_exact = any(k in text for k in EXACT_QUERY_KEYWORDS)
+        if has_exact:
+            return QueryType.EXACT_QUERY
+
         if any(k in text for k in ("ringkasan", "summary", "rekap", "agregat")):
             return QueryType.SUMMARY
 
         if "berapa" in text and any(h in text for h in COUNT_HINTS):
             return QueryType.COUNT
 
-        if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display", "terbaru", "latest")):
+        if filters or _has_any_code(text) or any(k in text for k in ("tampilkan", "lihat", "cari", "show", "display")):
             return QueryType.DETAIL
 
         if "per " in text or "berdasarkan" in text:

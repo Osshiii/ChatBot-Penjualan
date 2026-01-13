@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -261,6 +262,12 @@ class JewelrySalesBot:
 
         if qt == QueryType.HELP:
             response = self._handle_help_query()
+        elif qt == QueryType.LATEST_TRANSACTION:
+            response = self._handle_latest_transaction_query(parsed_query)
+        elif qt == QueryType.EXACT_QUERY:
+            response = self._handle_exact_query(parsed_query)
+        elif qt == QueryType.COMPARATIVE:
+            response = self._handle_comparative_query(parsed_query)
         elif qt == QueryType.DETAIL:
             response = self._handle_detail_query(parsed_query)
         elif qt == QueryType.COUNT:
@@ -426,9 +433,838 @@ class JewelrySalesBot:
         # tapi kamu fokusnya summary per produk; jadi cukup biarin).
         return response
 
-    # -------------------------
+    # ============================================================
+    # Latest Transaction Handler
+    # ============================================================
+    def _handle_latest_transaction_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle \"transaksi terbaru\" queries.
+        Steps:
+        1. Get max(TANGGAL) from database
+        2. Query all transactions with that date
+        3. Calculate summary
+        4. Return with summary
+        """
+        try:
+            # Step 1: Get latest date
+            sql_max = "SELECT MAX(TANGGAL) as max_tanggal FROM penjualan"
+            max_result = self.db.execute_query(sql_max)
+            latest_date = max_result[0].get("max_tanggal") if max_result else None
+
+            if not latest_date:
+                return {
+                    "query_type": "latest_transaction",
+                    "message": "❌ Data transaksi tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.0,
+                }
+
+            # Step 2: Query all transactions on that date
+            sql_detail = f"SELECT * FROM penjualan WHERE TANGGAL = ? ORDER BY KODE_BARANG"
+            results = self.db.execute_query(sql_detail, (latest_date,))
+
+            if not results:
+                return {
+                    "query_type": "latest_transaction",
+                    "message": f"❌ Tidak ada transaksi pada tanggal {latest_date}.",
+                    "data": [],
+                    "confidence": 0.0,
+                }
+
+            # Step 3: Calculate summary
+            total_count = len(results)
+            total_qty = sum(float(r.get("JUMLAH", 0) or 0) for r in results)
+            total_berat = sum(float(r.get("BERAT_TOTAL", 0) or 0) for r in results)
+            unique_barang = len(set(r.get("KODE_BARANG") for r in results if r.get("KODE_BARANG")))
+            unique_lokasi = len(set(r.get("LOKASI") for r in results if r.get("LOKASI")))
+
+            # Step 4: Build response message
+            summary_msg = (
+                f"📅 Transaksi Terbaru: {latest_date}\n"
+                f"Total transaksi: {total_count}\n"
+                f"Total unit: {total_qty:,.0f}\n"
+                f"Total berat: {total_berat:,.2f} g\n"
+                f"Jumlah barang unik: {unique_barang}\n"
+                f"Jumlah lokasi: {unique_lokasi}"
+            )
+
+            return {
+                "query_type": "latest_transaction",
+                "message": summary_msg,
+                "data": results,
+                "latest_date": latest_date,
+                "count": total_count,
+                "summary": {
+                    "total_transaksi": total_count,
+                    "total_qty": total_qty,
+                    "total_berat": total_berat,
+                    "unique_barang": unique_barang,
+                    "unique_lokasi": unique_lokasi,
+                },
+                "confidence": 0.95,
+            }
+
+        except Exception as e:
+            return {
+                "query_type": "latest_transaction",
+                "message": f"❌ Error: {str(e)}",
+                "data": [],
+                "confidence": 0.0,
+                "error": str(e),
+            }
+
+    # ============================================================
+    # Exact Query Handler (Specific Column/Date Requests)
+    # ============================================================
+    def _handle_exact_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle exact/specific queries like:
+        - \"Barang apa yang terjual pada tanggal X?\"
+        - \"Pada bulan dan tahun berapa kode MP002175 terjual?\"
+        
+        Returns only the requested information without analysis.
+        """
+        user_msg = parsed_query.get("original", "").lower()
+        filters = (parsed_query.get("filters") or {}).copy()
+
+        try:
+            # Case 1: \"Barang apa yang terjual pada tanggal X?\"
+            if "tanggal" in user_msg and ("barang apa" in user_msg or "produk apa" in user_msg):
+                # Extract date if provided
+                date_pattern = r"(\d{1,2})\s+([a-z]+)\s+(\d{4})"
+                date_match = re.search(date_pattern, user_msg, re.I)
+                
+                if not date_match and "TANGGAL" not in filters:
+                    return {
+                        "query_type": "exact_query",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.5,
+                    }
+
+                # Use explicit date from query or filter
+                where_clause = "1=1"
+                params = []
+                if "TANGGAL" in filters:
+                    where_clause = "TANGGAL = ?"
+                    params = [filters["TANGGAL"]]
+                
+                sql = f"SELECT DISTINCT KODE_BARANG FROM penjualan WHERE {where_clause} ORDER BY KODE_BARANG"
+                results = self.db.execute_query(sql, tuple(params)) if params else self.db.execute_query(sql)
+
+                if not results:
+                    return {
+                        "query_type": "exact_query",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+
+                items = ", ".join(r.get("KODE_BARANG", "") for r in results if r.get("KODE_BARANG"))
+                return {
+                    "query_type": "exact_query",
+                    "message": f"Barang yang terjual pada tanggal tersebut adalah: {items}",
+                    "data": results,
+                    "confidence": 0.9,
+                }
+
+            # Case 2: \"Pada bulan dan tahun berapa kode MP002175 terjual?\"
+            if "kode" in user_msg and ("bulan" in user_msg and "tahun" in user_msg or "kapan" in user_msg):
+                if "kode_barang" not in filters:
+                    return {
+                        "query_type": "exact_query",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.5,
+                    }
+
+                kode = filters["kode_barang"]
+                sql = "SELECT DISTINCT BULAN, TAHUN FROM penjualan WHERE KODE_BARANG = ? ORDER BY TAHUN, BULAN"
+                results = self.db.execute_query(sql, (kode,))
+
+                if not results:
+                    return {
+                        "query_type": "exact_query",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+
+                # Group by year
+                by_year = {}
+                for r in results:
+                    tahun = r.get("TAHUN")
+                    bulan = r.get("BULAN")
+                    if tahun not in by_year:
+                        by_year[tahun] = []
+                    by_year[tahun].append(bulan)
+
+                # Format response
+                response_parts = []
+                for tahun in sorted(by_year.keys()):
+                    bulan_list = sorted(set(by_year[tahun]))
+                    month_names = [
+                        ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                         "Juli", "Agustus", "September", "Oktober", "November", "Desember"][b-1]
+                        for b in bulan_list
+                    ]
+                    response_parts.append(f"bulan {', '.join(month_names)} tahun {tahun}")
+
+                msg = f"Kode barang {kode} terjual pada {', dan '.join(response_parts)}."
+                return {
+                    "query_type": "exact_query",
+                    "message": msg,
+                    "data": results,
+                    "confidence": 0.9,
+                }
+
+            # Default exact query: just return filtered data without analysis
+            detail_sql, detail_params = SalesQueryBuilder.build_detail_query(filters, limit=50, offset=0)
+            results = self.db.execute_query(detail_sql, tuple(detail_params))
+
+            if not results:
+                return {
+                    "query_type": "exact_query",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.7,
+                }
+
+            return {
+                "query_type": "exact_query",
+                "message": f"Ditemukan {len(results)} data sesuai kriteria.",
+                "data": results,
+                "count": len(results),
+                "confidence": 0.8,
+            }
+
+        except Exception as e:
+            return {
+                "query_type": "exact_query",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "confidence": 0.0,
+                "error": str(e),
+            }
+
+    # ============================================================
+    # Comparative/Aggregation Handler (Now Fully Implemented)
+    # ============================================================
+    def _handle_comparative_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle comparative/aggregation queries.
+        
+        Detects metric (SUM, COUNT, AVG, MAX, MIN, ranking)
+        Detects dimension (location, product, date, month, year)
+        Builds and executes aggregation queries
+        Returns direct results without extra analysis
+        
+        Examples:
+        - \"Lokasi mana yang memiliki penjualan terbanyak?\"
+        - \"Barang apa yang memiliki rata-rata berat tertinggi?\"
+        - \"Berapa total penjualan bulan Desember 2023?\"
+        - \"Top 5 barang paling sering terjual\"
+        """
+        user_msg = parsed_query.get("original", "").lower()
+        filters = (parsed_query.get("filters") or {}).copy()
+        
+        try:
+            # Step 1: Detect metric type
+            metric = self._detect_agg_metric(user_msg)
+            if not metric:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.3,
+                }
+            
+            # Step 2: Detect dimension
+            dimension = self._detect_agg_dimension(user_msg)
+            
+            # Step 3: Detect limit for "top N" queries
+            top_n = self._extract_top_n(user_msg)
+            
+            # Step 4: Build and execute query
+            if metric["type"] == "total":
+                return self._query_total_sales(metric, dimension, filters, user_msg)
+            elif metric["type"] == "count":
+                return self._query_count_transactions(metric, dimension, filters, top_n, user_msg)
+            elif metric["type"] == "average":
+                return self._query_average_value(metric, dimension, filters, user_msg)
+            elif metric["type"] == "ranking":
+                return self._query_ranking(metric, dimension, filters, top_n, user_msg)
+            elif metric["type"] == "daily_average":
+                return self._query_daily_average(filters, user_msg)
+            else:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.3,
+                }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+                "confidence": 0.0,
+            }
+
+    def _detect_agg_metric(self, text: str) -> Optional[Dict[str, Any]]:
+        """Detect aggregation metric type from query text."""
+        t = text.lower()
+        
+        # Detect "total" / "sum"
+        if re.search(r"\b(total|berapa.*total|jumlah keseluruhan)\b", t):
+            return {"type": "total", "func": "SUM"}
+        
+        # Detect "count" / "how many"
+        if re.search(r"\b(berapa|banyak|frekuensi|sering)\b", t) and not re.search(r"\b(rata|average|avg)\b", t):
+            return {"type": "count", "func": "COUNT"}
+        
+        # Detect "average" / "rata-rata"
+        if re.search(r"\b(rata|rata-rata|average|avg)\b", t):
+            return {"type": "average", "func": "AVG"}
+        
+        # Detect "daily average"
+        if re.search(r"\b(per hari|harian|daily)\b", t) and re.search(r"\b(rata|average|avg)\b", t):
+            return {"type": "daily_average", "func": "AVG"}
+        
+        # Detect "ranking" / "top N"
+        if re.search(r"\b(top|tertinggi|terendah|terbanyak|paling|ranking|urutan|terbesar)\b", t):
+            return {"type": "ranking", "func": "DESC"}
+        
+        return None
+
+    def _detect_agg_dimension(self, text: str) -> Optional[str]:
+        """Detect the dimension (what to group by)."""
+        t = text.lower()
+        
+        if re.search(r"\b(lokasi|location|toko|store|outlet)\b", t):
+            return "LOKASI"
+        if re.search(r"\b(barang|produk|product|item|kode barang|kode produk)\b", t):
+            return "KODE_BARANG"
+        if re.search(r"\b(channel|chann?el|chennel|chenel|chanel)\b", t):
+            return "CHANNEL"
+        if re.search(r"\b(bulan|month)\b", t):
+            return "BULAN"
+        if re.search(r"\b(tahun|year)\b", t):
+            return "TAHUN"
+        if re.search(r"\b(warna|color|warna barang)\b", t):
+            return "WARNA_BARANG"
+        if re.search(r"\b(ukuran|size|ukuran barang)\b", t):
+            return "UKURAN_BARANG"
+        if re.search(r"\b(klasifikasi|classification)\b", t):
+            return "KLASIFIKASI_BARANG"
+        if re.search(r"\b(tanggal|date|per hari|harian)\b", t):
+            return "TANGGAL"
+        
+        return None
+
+    def _extract_top_n(self, text: str) -> int:
+        """Extract top N value from query like 'top 5 barang'."""
+        m = re.search(r"\b(top|top\s*)?(\d+)\b", text, re.I)
+        if m:
+            try:
+                return int(m.group(2))
+            except Exception:
+                pass
+        return 1
+
+    def _query_total_sales(self, metric: Dict[str, Any], dimension: Optional[str], filters: Dict[str, Any], user_msg: str) -> Dict[str, Any]:
+        """Query total sales (SUM) with optional grouping."""
+        try:
+            where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+            
+            # Special case: if user specifies specific bulan+tahun, just sum that month (not ranking)
+            if dimension == "BULAN" and "bulan" in filters and "tahun" in filters:
+                # Query for total of the specific month requested (no ranking)
+                sql = f"SELECT SUM(JUMLAH) as total_qty, SUM(BERAT_TOTAL) as total_berat, COUNT(*) as transaction_count FROM penjualan WHERE {where_clause}"
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results or not results[0].get("total_qty"):
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                total_qty = results[0].get("total_qty", 0)
+                bulan_num = filters.get("bulan")
+                tahun_num = filters.get("tahun")
+                bulan_name = self._month_number_to_name(int(bulan_num)) if bulan_num else ""
+                
+                msg = f"Total penjualan bulan {bulan_name} {tahun_num} adalah: {total_qty:,.0f}."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": metric["func"],
+                    "confidence": 0.95,
+                }
+            
+            if dimension:
+                # Total per dimension
+                sql = f"""
+                    SELECT
+                        {dimension} as kategori,
+                        SUM(JUMLAH) as total_qty,
+                        SUM(BERAT_TOTAL) as total_berat,
+                        COUNT(*) as transaction_count
+                    FROM penjualan
+                    WHERE {where_clause}
+                    GROUP BY {dimension}
+                    ORDER BY total_qty DESC
+                    LIMIT 1
+                """
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                top_item = results[0]
+                kategori = top_item.get("kategori")
+                total_qty = top_item.get("total_qty", 0)
+                
+                # Handle None/empty entity
+                if not kategori:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.7,
+                    }
+                
+                # Map month number to name if dimension is BULAN
+                if dimension == "BULAN":
+                    kategori = self._month_number_to_name(int(kategori))
+                
+                dimension_label = self._format_dimension_label(dimension)
+                msg = f"{dimension_label} dengan penjualan terbanyak adalah: {kategori}."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": metric["func"],
+                    "dimension": dimension,
+                    "confidence": 0.9,
+                }
+            else:
+                # Total overall
+                sql = f"SELECT SUM(JUMLAH) as total_qty, SUM(BERAT_TOTAL) as total_berat FROM penjualan WHERE {where_clause}"
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results or not results[0].get("total_qty"):
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                total = results[0].get("total_qty", 0)
+                msg = f"Total penjualan adalah: {total:,.0f}."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": metric["func"],
+                    "confidence": 0.9,
+                }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+            }
+
+    def _query_count_transactions(self, metric: Dict[str, Any], dimension: Optional[str], filters: Dict[str, Any], top_n: int, user_msg: str) -> Dict[str, Any]:
+        """Query transaction count with optional grouping."""
+        try:
+            where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+            
+            if dimension:
+                # Count per dimension - ranking style
+                sql = f"""
+                    SELECT
+                        {dimension} as kategori,
+                        COUNT(*) as transaction_count,
+                        SUM(JUMLAH) as total_qty
+                    FROM penjualan
+                    WHERE {where_clause}
+                    GROUP BY {dimension}
+                    ORDER BY transaction_count DESC
+                    LIMIT ?
+                """
+                params_list = list(params) + [top_n]
+                results = self.db.execute_query(sql, tuple(params_list))
+                
+                if not results:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                if top_n > 1:
+                    # Top N format
+                    items = []
+                    for r in results:
+                        item = r.get("kategori")
+                        if item:
+                            # Map month number to name if dimension is BULAN
+                            if dimension == "BULAN":
+                                item = self._month_number_to_name(int(item))
+                            items.append(str(item))
+                    
+                    if not items:
+                        return {
+                            "query_type": "comparative",
+                            "message": "Data tidak ditemukan.",
+                            "data": [],
+                            "confidence": 0.7,
+                        }
+                    
+                    items_str = ", ".join(items)
+                    dimension_label = self._format_dimension_label(dimension)
+                    msg = f"Top {top_n} {dimension_label} paling sering terjual: {items_str}."
+                else:
+                    # Single top format
+                    top_item = results[0]
+                    kategori = top_item.get("kategori")
+                    count = top_item.get("transaction_count", 0)
+                    
+                    # Handle None/empty entity
+                    if not kategori:
+                        return {
+                            "query_type": "comparative",
+                            "message": "Data tidak ditemukan.",
+                            "data": [],
+                            "confidence": 0.7,
+                        }
+                    
+                    # Map month number to name if dimension is BULAN
+                    if dimension == "BULAN":
+                        kategori = self._month_number_to_name(int(kategori))
+                    
+                    dimension_label = self._format_dimension_label(dimension)
+                    msg = f"{dimension_label} yang paling sering terjual adalah: {kategori} ({count} transaksi)."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": "COUNT",
+                    "dimension": dimension,
+                    "top_n": top_n,
+                    "confidence": 0.9,
+                }
+            else:
+                # Overall count
+                sql = f"SELECT COUNT(*) as total_count FROM penjualan WHERE {where_clause}"
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                total = results[0].get("total_count", 0)
+                msg = f"Total transaksi adalah: {total:,}."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": "COUNT",
+                    "confidence": 0.9,
+                }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+            }
+
+    def _query_average_value(self, metric: Dict[str, Any], dimension: Optional[str], filters: Dict[str, Any], user_msg: str) -> Dict[str, Any]:
+        """Query average values with optional grouping."""
+        try:
+            where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+            
+            # Determine what to average
+            avg_field = "BERAT_SATUAN"
+            if re.search(r"\b(jumlah|qty|quantity)\b", user_msg):
+                avg_field = "JUMLAH"
+            
+            if dimension:
+                # Average per dimension
+                sql = f"""
+                    SELECT
+                        {dimension} as kategori,
+                        AVG({avg_field}) as avg_value,
+                        COUNT(*) as transaction_count
+                    FROM penjualan
+                    WHERE {where_clause}
+                    GROUP BY {dimension}
+                    ORDER BY avg_value DESC
+                    LIMIT 1
+                """
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                top_item = results[0]
+                kategori = top_item.get("kategori")
+                avg_val = top_item.get("avg_value", 0)
+                
+                # Handle None/empty entity
+                if not kategori:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.7,
+                    }
+                
+                # Map month number to name if dimension is BULAN
+                if dimension == "BULAN":
+                    kategori = self._month_number_to_name(int(kategori))
+                
+                unit = "g" if avg_field == "BERAT_SATUAN" else "unit"
+                dimension_label = self._format_dimension_label(dimension)
+                msg = f"{dimension_label} dengan rata-rata {avg_field.lower()} tertinggi adalah: {kategori} ({avg_val:.2f} {unit})."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": "AVG",
+                    "dimension": dimension,
+                    "confidence": 0.9,
+                }
+            else:
+                # Overall average
+                sql = f"SELECT AVG({avg_field}) as avg_value FROM penjualan WHERE {where_clause}"
+                results = self.db.execute_query(sql, tuple(params))
+                
+                if not results or results[0].get("avg_value") is None:
+                    return {
+                        "query_type": "comparative",
+                        "message": "Data tidak ditemukan.",
+                        "data": [],
+                        "confidence": 0.8,
+                    }
+                
+                avg_val = results[0].get("avg_value", 0)
+                unit = "g" if avg_field == "BERAT_SATUAN" else "unit"
+                msg = f"Rata-rata {avg_field.lower()} adalah: {avg_val:.2f} {unit}."
+                
+                return {
+                    "query_type": "comparative",
+                    "message": msg,
+                    "data": results,
+                    "metric": "AVG",
+                    "confidence": 0.9,
+                }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+            }
+
+    def _query_ranking(self, metric: Dict[str, Any], dimension: Optional[str], filters: Dict[str, Any], top_n: int, user_msg: str) -> Dict[str, Any]:
+        """Query ranking/top N results."""
+        try:
+            where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+            
+            if not dimension:
+                dimension = "KODE_BARANG"  # Default to product ranking
+            
+            # Determine what metric to rank by
+            if re.search(r"\b(berat|weight)\b", user_msg):
+                order_field = "AVG(BERAT_SATUAN)"
+            elif re.search(r"\b(terbanyak|paling|tertinggi|terbesar|paling sering)\b", user_msg):
+                order_field = "SUM(JUMLAH)"
+            else:
+                order_field = "COUNT(*)"
+            
+            sql = f"""
+                SELECT
+                    {dimension} as kategori,
+                    COUNT(*) as transaction_count,
+                    SUM(JUMLAH) as total_qty,
+                    AVG(BERAT_SATUAN) as avg_berat
+                FROM penjualan
+                WHERE {where_clause}
+                GROUP BY {dimension}
+                ORDER BY {order_field} DESC
+                LIMIT ?
+            """
+            params_list = list(params) + [top_n]
+            results = self.db.execute_query(sql, tuple(params_list))
+            
+            if not results:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.8,
+                }
+            
+            items = []
+            for r in results:
+                item = r.get("kategori")
+                if item:
+                    # Map month number to name if dimension is BULAN
+                    if dimension == "BULAN":
+                        item = self._month_number_to_name(int(item))
+                    items.append(str(item))
+            
+            if not items:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.7,
+                }
+            
+            items_str = ", ".join(items)
+            dimension_label = self._format_dimension_label(dimension)
+            
+            msg = f"Top {top_n} {dimension_label}: {items_str}."
+            
+            return {
+                "query_type": "comparative",
+                "message": msg,
+                "data": results,
+                "metric": "RANKING",
+                "dimension": dimension,
+                "top_n": top_n,
+                "confidence": 0.9,
+            }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+            }
+
+    def _query_daily_average(self, filters: Dict[str, Any], user_msg: str) -> Dict[str, Any]:
+        """Query average transactions per day (no ranking/top date)."""
+        try:
+            where_clause, params = SalesQueryBuilder.build_where_clause(filters)
+            
+            # Count transactions per day, then calculate average
+            sql = f"""
+                SELECT
+                    TANGGAL as tanggal,
+                    COUNT(*) as daily_count
+                FROM penjualan
+                WHERE {where_clause}
+                GROUP BY TANGGAL
+            """
+            daily_results = self.db.execute_query(sql, tuple(params))
+            
+            if not daily_results:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.8,
+                }
+            
+            counts = [float(r.get("daily_count", 0)) for r in daily_results if r.get("daily_count")]
+            if not counts:
+                return {
+                    "query_type": "comparative",
+                    "message": "Data tidak ditemukan.",
+                    "data": [],
+                    "confidence": 0.8,
+                }
+            
+            avg_daily = sum(counts) / len(counts)
+            # Format message to show only the average, no specific dates or rankings
+            msg = f"Rata-rata jumlah transaksi per hari adalah: {avg_daily:.2f} transaksi/hari."
+            
+            return {
+                "query_type": "comparative",
+                "message": msg,
+                "data": daily_results,
+                "metric": "AVG_DAILY",
+                "daily_average": avg_daily,
+                "confidence": 0.9,
+            }
+        
+        except Exception as e:
+            return {
+                "query_type": "comparative",
+                "message": "Data tidak ditemukan.",
+                "data": [],
+                "error": str(e),
+            }
+
+    def _format_dimension_label(self, dimension: str) -> str:
+        """Format dimension name to human-readable label."""
+        labels = {
+            "LOKASI": "Lokasi",
+            "KODE_BARANG": "Barang",
+            "CHANNEL": "Channel",
+            "BULAN": "Bulan",
+            "TAHUN": "Tahun",
+            "WARNA_BARANG": "Warna",
+            "UKURAN_BARANG": "Ukuran",
+            "KLASIFIKASI_BARANG": "Klasifikasi",
+            "TANGGAL": "Tanggal",
+        }
+        return labels.get(dimension, dimension)
+
+    def _month_number_to_name(self, month_num: int) -> str:
+        """Convert month number (1-12) to Indonesian month name."""
+        months = [
+            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+        ]
+        try:
+            if 1 <= month_num <= 12:
+                return months[month_num - 1]
+        except Exception:
+            pass
+        return str(month_num)
+
+    # ============================================================
     # LLM rewrite hook (NEW: pakai answer_mode, bukan gabungan)
-    # -------------------------
+    # ============================================================
     def _maybe_rewrite_with_llm(
         self,
         user_message: str,

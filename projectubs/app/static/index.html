@@ -36,6 +36,27 @@
     <!-- Overlay -->
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
+    <!-- Confirm Delete Modal -->
+    <div class="modal-overlay" id="deleteModalOverlay" style="display: none;"></div>
+    <div class="confirm-delete-modal" id="deleteConfirmModal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close" id="deleteModalClose" aria-label="Close modal">&times;</button>
+            <h2 class="modal-title" id="deleteModalTitle">Hapus riwayat chat ini?</h2>
+            <p class="modal-description">Tindakan ini tidak dapat dibatalkan.</p>
+            <div class="modal-error" id="deleteErrorMessage" style="display: none;"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="deleteModalCancel">Batal</button>
+                <button class="btn btn-danger" id="deleteModalConfirm">
+                    <span class="btn-text">Hapus</span>
+                    <span class="btn-loader" style="display: none;">Menghapus...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
     <!-- Main Content -->
     <div class="main-content">
         <!-- Topbar -->
