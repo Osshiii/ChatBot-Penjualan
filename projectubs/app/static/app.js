@@ -19,6 +19,7 @@ let chatHistory = [];
 let currentPage = 1;
 const pageSize = 10;
 let lastQuery = null;
+let lastAssistantBubbleEl = null;
 
 // Delete confirmation state
 let deleteConfirmState = {
@@ -528,6 +529,7 @@ function addMessage(text, role, data = null, totalCount = null) {
         textDiv.className = 'message-text';
         textDiv.textContent = text;
         bubbleEl.appendChild(textDiv);
+        lastAssistantBubbleEl = bubbleEl;
         
         if (data && data.length > 0) {
             const tableEl = buildTable(data, totalCount, currentPage);
@@ -590,7 +592,8 @@ function buildTable(data, totalCount, page = 1) {
     if (totalCount && totalCount > data.length) {
         const infoDiv = document.createElement('div');
         infoDiv.className = 'table-info';
-        infoDiv.textContent = `Menampilkan ${(page - 1) * pageSize + 1}–${(page - 1) * pageSize + data.length} dari ${totalCount} data`;
+        const totalPages = Math.ceil(totalCount / pageSize);
+        infoDiv.textContent = `Menampilkan ${(page - 1) * pageSize + 1}–${(page - 1) * pageSize + data.length} dari ${totalCount} data (Halaman ${page} dari ${totalPages})`;
         wrapper.appendChild(infoDiv);
 
         const pagination = buildPagination(totalCount, page);
@@ -613,14 +616,61 @@ function buildPagination(totalCount, page) {
     prevBtn.onclick = () => changePage(page - 1);
     nav.appendChild(prevBtn);
 
-    // Pages
-    for (let i = 1; i <= totalPages; i++) {
-        if (i > 5 && i < totalPages) continue; // biar nggak kepanjangan
+    // Pages - smart range
+    let startPage = 1;
+    let endPage = totalPages;
+    
+    if (totalPages > 7) {
+        // Tampilkan 5 pages di sekitar current page
+        startPage = Math.max(1, page - 2);
+        endPage = Math.min(totalPages, page + 2);
+        
+        // Jika range terlalu ke kiri, expand ke kanan
+        if (startPage === 1) {
+            endPage = Math.min(totalPages, 5);
+        }
+        // Jika range terlalu ke kanan, expand ke kiri
+        if (endPage === totalPages) {
+            startPage = Math.max(1, totalPages - 4);
+        }
+    }
+    
+    // Tombol page pertama jika tidak termasuk
+    if (startPage > 1) {
+        const btn = document.createElement('button');
+        btn.textContent = '1';
+        btn.onclick = () => changePage(1);
+        nav.appendChild(btn);
+        
+        if (startPage > 2) {
+            const dots = document.createElement('span');
+            dots.className = 'pagination-dots';
+            dots.textContent = '...';
+            nav.appendChild(dots);
+        }
+    }
 
+    // Page buttons dalam range
+    for (let i = startPage; i <= endPage; i++) {
         const btn = document.createElement('button');
         btn.textContent = i;
         btn.className = i === page ? 'active' : '';
         btn.onclick = () => changePage(i);
+        nav.appendChild(btn);
+    }
+    
+    // Tombol last page jika tidak termasuk
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            const dots = document.createElement('span');
+            dots.className = 'pagination-dots';
+            dots.textContent = '...';
+            nav.appendChild(dots);
+        }
+        
+        const btn = document.createElement('button');
+        btn.textContent = totalPages;
+        btn.onclick = () => changePage(totalPages);
         nav.appendChild(btn);
     }
 
@@ -636,7 +686,7 @@ function buildPagination(totalCount, page) {
 
 function changePage(page) {
     if (!lastQuery) return;
-    sendQuery(lastQuery, page);
+    sendQueryUpdateBubble(lastQuery, page);
 }
 
 
@@ -757,6 +807,40 @@ async function sendQuery(query, page = 1) {
         btnSend.disabled = false;
         inputMessage.focus();
     }
+}
+async function sendQueryUpdateBubble(query, page = 1) {
+  if (!lastAssistantBubbleEl) return;
+
+  isLoading = true;
+  btnSend.disabled = true;
+  currentPage = page;
+  lastQuery = query;
+
+  try {
+    const response = await fetch(`/chat?query=${encodeURIComponent(query)}&page=${page}&limit=${pageSize}`);
+    const result = await response.json();
+
+    const data = result.data || null;
+    const totalCount = result.total_count || null;
+
+    // cari table wrapper lama di bubble lama
+    const oldTable = lastAssistantBubbleEl.querySelector('.table-wrapper');
+
+    // bikin table baru
+    if (data && data.length > 0) {
+      const newTable = buildTable(data, totalCount, page);
+
+      if (oldTable) oldTable.replaceWith(newTable);
+      else lastAssistantBubbleEl.appendChild(newTable);
+    }
+
+  } catch (e) {
+    console.error(e);
+  } finally {
+    isLoading = false;
+    btnSend.disabled = false;
+    inputMessage.focus();
+  }
 }
 
 

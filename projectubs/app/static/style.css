@@ -618,6 +618,7 @@ body {
     gap: 6px;
     margin-top: 10px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 .pagination button {
@@ -638,6 +639,12 @@ body {
 .pagination button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.pagination-dots {
+    font-size: 12px;
+    color: #999;
+    padding: 0 4px;
 }
 
 .table-info {

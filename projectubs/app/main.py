@@ -88,9 +88,9 @@ def chat(
         bot_instance = get_bot()
 
         offset = (page - 1) * limit
-        query_with_paging = f"{query} limit {limit} offset {offset}"
 
-        result = bot_instance.process_message(query_with_paging)
+        # Pass pagination params separately, NOT embedded in query text
+        result = bot_instance.process_message(query, limit=limit, offset=offset)
 
         result.setdefault("limit", limit)
         result.setdefault("offset", offset)

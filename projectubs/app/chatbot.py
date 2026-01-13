@@ -230,7 +230,7 @@ class JewelrySalesBot:
         self.conversation_history: List[Dict[str, Any]] = []
         self.debug = env_bool("DEBUG", False)
 
-    def process_message(self, user_message: str) -> Dict[str, Any]:
+    def process_message(self, user_message: str, limit: int = 10, offset: int = 0) -> Dict[str, Any]:
         self.conversation_history.append({
             "timestamp": datetime.now().isoformat(),
             "role": "user",
@@ -238,6 +238,12 @@ class JewelrySalesBot:
         })
 
         parsed_query = self.parser.parse(user_message)
+        
+        # Inject pagination params directly into filters (bypass NLP parsing)
+        if "filters" not in parsed_query:
+            parsed_query["filters"] = {}
+        parsed_query["filters"]["limit"] = limit
+        parsed_query["filters"]["offset"] = offset
 
         if parsed_query.get("error"):
             return {
