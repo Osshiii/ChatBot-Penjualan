@@ -566,6 +566,21 @@ body {
     background: #dc2626;
     transform: translateY(-1px);
 }
+.modal-input{
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.modal-input:focus{
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(74, 159, 216, 0.15);
+}
 
 /* ==================== TOAST ==================== */
 .toast-container {

@@ -53,6 +53,25 @@
         </div>
     </div>
 
+    <!-- Rename Modal -->
+    <div class="modal-overlay" id="renameModalOverlay" style="display:none;"></div>
+    <div class="confirm-delete-modal" id="renameModal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle" style="display:none;">
+        <div class="modal-content">
+            <button class="modal-close" id="renameModalClose" aria-label="Close modal">&times;</button>
+            <h2 class="modal-title" id="renameModalTitle">Ubah nama chat</h2>
+            <p class="modal-description">Masukkan nama baru untuk riwayat chat ini.</p>
+            <input id="renameInput" class="modal-input" type="text" placeholder="Contoh: Transaksi terbaru" autocomplete="off" />
+            <div class="modal-error" id="renameErrorMessage" style="display:none;"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="renameCancelBtn">Batal</button>
+                <button class="btn btn-danger" id="renameConfirmBtn">
+                    <span class="btn-text">Simpan</span>
+                    <span class="btn-loader" style="display:none;">Menyimpan...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div class="toast-container" id="toastContainer"></div>
 

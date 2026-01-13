@@ -30,6 +30,14 @@ let deleteConfirmState = {
     deleteErrorMessage: null
 };
 
+// Rename confirmation state
+const renameState = {
+  isOpen: false,
+  isSaving: false,
+  chatId: null
+};
+
+
 // ==================== INITIALIZATION ====================
 function initApp() {
     console.log('🚀 Initializing Jewelry Sales Chatbot...');
@@ -63,11 +71,32 @@ function attachEventListeners() {
     deleteModalClose?.addEventListener('click', closeDeleteModal);
     deleteModalCancel?.addEventListener('click', closeDeleteModal);
     deleteModalConfirm?.addEventListener('click', handleDeleteConfirm);
+
+    // Rename modal listeners
+    const renameModalOverlay = document.getElementById('renameModalOverlay');
+    const renameModalClose = document.getElementById('renameModalClose');
+    const renameCancelBtn = document.getElementById('renameCancelBtn');
+    const renameConfirmBtn = document.getElementById('renameConfirmBtn');
+    const renameInput = document.getElementById('renameInput');
+
+    renameModalOverlay?.addEventListener('click', closeRenameModal);
+    renameModalClose?.addEventListener('click', closeRenameModal);
+    renameCancelBtn?.addEventListener('click', closeRenameModal);
+    renameConfirmBtn?.addEventListener('click', handleRenameConfirm);
+
+    // Enter untuk submit
+    renameInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleRenameConfirm();
+        }
+    });
     
     // ESC key to close modal
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && deleteConfirmState.isConfirmOpen) {
-            closeDeleteModal();
+        if (e.key === 'Escape') {
+            if (deleteConfirmState.isConfirmOpen) closeDeleteModal();
+            if (renameState.isOpen) closeRenameModal();
         }
     });
 }
@@ -254,15 +283,10 @@ function loadChat(chatId) {
 }
 
 function renameChat(chatId) {
-    const chat = chatHistory.find(c => c.id === chatId);
-    if (!chat) return;
-    
-    const newTitle = prompt('Masukkan nama baru:', chat.title);
-    if (newTitle && newTitle.trim()) {
-        chat.title = newTitle.trim();
-        saveChatHistory();
-        renderChatHistory();
-    }
+  const chat = chatHistory.find(c => c.id === chatId);
+  if (!chat) return;
+
+  openRenameModal(chat.id, chat.title);
 }
 
 function deleteChat(chatId) {
@@ -321,6 +345,96 @@ function closeDeleteModal() {
     } else {
         console.error('❌ Modal or overlay element not found');
     }
+}
+
+function openRenameModal(chatId, currentName = '') {
+  const overlay = document.getElementById('renameModalOverlay');
+  const modal = document.getElementById('renameModal');
+  const input = document.getElementById('renameInput');
+  const err = document.getElementById('renameErrorMessage');
+
+  renameState.isOpen = true;
+  renameState.chatId = chatId;
+  renameState.isSaving = false;
+
+  err.style.display = 'none';
+  err.textContent = '';
+
+  overlay.style.display = 'block';
+  modal.style.display = 'block';
+
+  input.value = currentName || '';
+  // penting: fokus setelah modal tampil
+  setTimeout(() => input.focus(), 0);
+
+  document.body.style.overflow = 'hidden';
+}
+
+function closeRenameModal() {
+  const overlay = document.getElementById('renameModalOverlay');
+  const modal = document.getElementById('renameModal');
+
+  overlay.style.display = 'none';
+  modal.style.display = 'none';
+
+  renameState.isOpen = false;
+  renameState.chatId = null;
+  renameState.isSaving = false;
+
+  document.body.style.overflow = '';
+}
+
+async function handleRenameConfirm() {
+  if (renameState.isSaving) return;
+
+  const chatId = renameState.chatId;
+  const input = document.getElementById('renameInput');
+  const newName = (input.value || '').trim();
+
+  const confirmBtn = document.getElementById('renameConfirmBtn');
+  const cancelBtn = document.getElementById('renameCancelBtn');
+  const btnText = confirmBtn.querySelector('.btn-text');
+  const btnLoader = confirmBtn.querySelector('.btn-loader');
+  const err = document.getElementById('renameErrorMessage');
+
+  if (!newName) {
+    err.textContent = 'Nama tidak boleh kosong.';
+    err.style.display = 'block';
+    return;
+  }
+
+  try {
+    renameState.isSaving = true;
+    err.style.display = 'none';
+
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    btnText.style.display = 'none';
+    btnLoader.style.display = 'inline';
+
+    // === UPDATE DATA LOCAL ===
+    const idx = chatHistory.findIndex(c => c.id === chatId);
+    if (idx === -1) throw new Error('Chat tidak ditemukan');
+
+    chatHistory[idx].title = newName;     // atau field yang kamu pakai untuk nama
+    saveChatHistory();
+    renderChatHistory();
+
+    closeRenameModal();
+    showToast('Nama chat berhasil diubah', 'success', 3000);
+
+  } catch (e) {
+    err.textContent = e.message || 'Gagal mengubah nama chat';
+    err.style.display = 'block';
+    showToast(err.textContent, 'error', 5000);
+
+  } finally {
+    renameState.isSaving = false;
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    btnText.style.display = 'inline';
+    btnLoader.style.display = 'none';
+  }
 }
 
 async function handleDeleteConfirm() {
