@@ -481,7 +481,6 @@ function saveChatMessage(text, role, data = null, totalCount = null) {
 function showEmptyState() {
     messagesWrapper.innerHTML = `
         <div class="empty-state">
-            <div class="empty-logo">💎</div>
             <h2 class="empty-title">Jewelry Sales AI</h2>
             <p class="empty-subtitle">Dapatkan insight mendalam tentang penjualan perhiasan Anda</p>
             <div class="quick-actions">
