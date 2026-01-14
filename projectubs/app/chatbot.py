@@ -358,6 +358,9 @@ class JewelrySalesBot:
             parsed_query["filters"]["limit"] = limit
             parsed_query["filters"]["offset"] = offset
             response = self._handle_detail_query(parsed_query)
+            # Force show_data if query started with "tampilkan data"
+            if parsed_query.get("force_show_data"):
+                response["show_data"] = True
         elif qt == QueryType.COUNT:
             response = self._handle_count_query(parsed_query)
         elif qt == QueryType.SUMMARY:
@@ -724,6 +727,11 @@ class JewelrySalesBot:
                 "data": results,
                 "count": len(results),
                 "confidence": 0.8,
+                "show_data": True,
+                "limit": 50,
+                "offset": 0,
+                "page": 1,
+                "total_count": len(results)
             }
 
         except Exception as e:
@@ -947,6 +955,12 @@ class JewelrySalesBot:
                     "metric": metric["func"],
                     "dimension": dimension,
                     "confidence": 0.9,
+                    "show_data": True,
+                    "limit": 10,
+                    "offset": 0,
+                    "page": 1,
+                    "count": len(results),
+                    "total_count": len(results)
                 }
             else:
                 # Total overall
@@ -970,6 +984,12 @@ class JewelrySalesBot:
                     "data": results,
                     "metric": metric["func"],
                     "confidence": 0.9,
+                    "show_data": True,
+                    "limit": 10,
+                    "offset": 0,
+                    "page": 1,
+                    "count": len(results),
+                    "total_count": len(results)
                 }
         
         except Exception as e:
@@ -1061,6 +1081,12 @@ class JewelrySalesBot:
                     "dimension": dimension,
                     "top_n": top_n,
                     "confidence": 0.9,
+                    "show_data": True,
+                    "limit": 10,
+                    "offset": 0,
+                    "page": 1,
+                    "count": len(results),
+                    "total_count": len(results)
                 }
             else:
                 # Overall count
@@ -1084,6 +1110,12 @@ class JewelrySalesBot:
                     "data": results,
                     "metric": "COUNT",
                     "confidence": 0.9,
+                    "show_data": True,
+                    "limit": 10,
+                    "offset": 0,
+                    "page": 1,
+                    "count": len(results),
+                    "total_count": len(results)
                 }
         
         except Exception as e:
@@ -1454,7 +1486,9 @@ class JewelrySalesBot:
                 "offset": offset,
                 "total_count": total_records,
                 "next_offset": (offset + limit) if (offset + limit) < total_records else None,
-                "prev_offset": max(0, offset - limit) if offset > 0 else None
+                "prev_offset": max(0, offset - limit) if offset > 0 else None,
+                "show_data": True,
+                "page": (offset // limit) + 1 if limit > 0 else 1
             }
 
         except Exception as e:
@@ -1540,6 +1574,11 @@ class JewelrySalesBot:
                 "confidence": confidence,
                 "group_by": group_by,
                 "count": len(results),
+                "show_data": True,
+                "limit": 10,
+                "offset": 0,
+                "page": 1,
+                "total_count": len(results)
             }
 
         except Exception as e:

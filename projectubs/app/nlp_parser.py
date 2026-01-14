@@ -291,6 +291,14 @@ def _detect_answer_mode(text: str) -> AnswerMode:
     return AnswerMode.AUTO
 
 
+def _detect_show_data(text: str) -> bool:
+    """
+    Force show_data=True jika query diawali 'tampilkan data'.
+    """
+    t = text.lower()
+    return re.search(r"^\s*tampilkan\s+data|tampilkan data", t) is not None
+
+
 class NLPParser:
     def parse(self, user_message: str) -> Dict[str, Any]:
         raw = user_message or ""
@@ -332,6 +340,7 @@ class NLPParser:
         confidence = self._estimate_confidence(query_type, filters, text)
 
         answer_mode = _detect_answer_mode(text)
+        force_show_data = _detect_show_data(text)
 
         return {
             "query_type": query_type,
@@ -342,6 +351,7 @@ class NLPParser:
             "confidence": confidence,
             "original": raw,
             "normalized": text,
+            "force_show_data": force_show_data,
         }
 
     def _detect_exploratory_intent(self, text: str) -> Dict[str, Any]:

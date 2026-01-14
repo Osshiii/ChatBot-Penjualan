@@ -608,9 +608,9 @@ function showEmptyState() {
                     <div class="action-icon">📊</div>
                     <span>Ringkasan per produk</span>
                 </button>
-                <button class="action-card" onclick="sendQuickAction('Penjualan bulan ini')">
+                <button class="action-card" onclick="sendQuickAction('Tampilkan data penjualan bulan ini')">
                     <div class="action-icon">📈</div>
-                    <span>Penjualan bulan ini</span>
+                    <span>Tampilkan data penjualan bulan ini</span>
                 </button>
                 <button class="action-card" onclick="sendQuickAction('Analisis per lokasi')">
                     <div class="action-icon">📍</div>
@@ -906,9 +906,9 @@ async function sendQuery(query, page = 1) {
         removeTypingIndicator();
 
         const text = result.message || 'Tidak ada jawaban.';
-        // Only show data if show_data flag is true, otherwise pass null
-        const data = (result.show_data && result.data && result.data.length > 0) ? result.data : null;
-        const totalCount = (result.show_data) ? result.count : null;
+        // Show data if backend sends data array (regardless of show_data flag for display)
+        const data = (result.data && Array.isArray(result.data) && result.data.length > 0) ? result.data : null;
+        const totalCount = result.count || result.total_count;
 
         addMessage(text, 'assistant', data, totalCount);
         saveChatMessage(text, 'assistant', data, totalCount);
@@ -935,9 +935,9 @@ async function sendQueryUpdateBubble(query, page = 1) {
     const response = await fetch(`/chat?query=${encodeURIComponent(query)}&page=${page}&limit=${pageSize}`);
     const result = await response.json();
 
-    // Only show data if show_data flag is true
-    const data = (result.show_data && result.data && result.data.length > 0) ? result.data : null;
-    const totalCount = (result.show_data) ? result.count : null;
+    // Show data if backend sends data array (regardless of show_data flag for display)
+    const data = (result.data && Array.isArray(result.data) && result.data.length > 0) ? result.data : null;
+    const totalCount = result.count || result.total_count;
 
     // cari table wrapper lama di bubble lama
     const oldTable = lastAssistantBubbleEl.querySelector('.table-wrapper');
