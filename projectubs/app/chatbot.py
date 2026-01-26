@@ -1449,7 +1449,13 @@ class JewelrySalesBot:
 
         limit = int(filters.pop("limit", 10) or 10)
         offset = int(filters.pop("offset", 0) or 0)
-        limit = max(1, min(limit, 50))
+        
+        # PENTING: Jangan batasi limit untuk CSV download
+        # Hanya batasi kalau limit masih kecil (untuk display)
+        if limit <= 1000:  # Display mode
+            limit = max(1, min(limit, 50))
+        # else: CSV download mode, no limit restriction
+        
         offset = max(0, offset)
 
         try:
@@ -1501,7 +1507,7 @@ class JewelrySalesBot:
                 "confidence": 0.0,
                 "error": str(e),
             }
-
+    
     def _handle_count_query(self, parsed_query: Dict[str, Any]) -> Dict[str, Any]:
         filters = (parsed_query.get("filters") or {}).copy()
         confidence = parsed_query.get("confidence", 0.0)

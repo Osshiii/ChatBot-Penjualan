@@ -663,12 +663,115 @@ function addMessage(text, role, data = null, totalCount = null) {
     }, 100);
 }
 
+// ==================== CSV DOWNLOAD FUNCTIONS ====================
+
+/**
+ * Download full results from backend as CSV
+ */
+async function downloadFullCSV(query) {
+    if (!query) {
+        showToast('Tidak ada query untuk diunduh', 'error', 3000);
+        return;
+    }
+    
+    const downloadBtn = document.querySelector('.btn-download-csv');
+    const btnText = downloadBtn?.querySelector('.btn-text');
+    const btnIcon = downloadBtn?.querySelector('.btn-icon');
+    const btnLoader = downloadBtn?.querySelector('.btn-loader');
+    
+    try {
+        // Show loading state
+        if (downloadBtn) {
+            downloadBtn.disabled = true;
+            downloadBtn.classList.add('loading');
+        }
+        
+        showToast('Memproses unduhan...', 'info', 2000);
+        
+        const response = await fetch(`/chat/download?query=${encodeURIComponent(query)}`);
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to download CSV');
+        }
+        
+        // Get filename from headers or use default
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'jewelry-sales-export.csv';
+        if (contentDisposition) {
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(contentDisposition);
+            if (matches && matches[1]) {
+                filename = matches[1].replace(/['"]/g, '');
+            }
+        }
+        
+        // Download the file
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        showToast('File CSV berhasil diunduh', 'success', 3000);
+        
+    } catch (error) {
+        console.error('Error downloading full CSV:', error);
+        showToast(error.message || 'Gagal mengunduh file CSV', 'error', 3000);
+    } finally {
+        // Reset button state
+        if (downloadBtn) {
+            downloadBtn.disabled = false;
+            downloadBtn.classList.remove('loading');
+        }
+    }
+}
+
+/**
+ * Build table with overview mode (10 rows) and download button
+ */
 function buildTable(data, totalCount, page = 1) {
     if (!Array.isArray(data) || data.length === 0) return null;
 
     const wrapper = document.createElement('div');
     wrapper.className = 'table-wrapper';
 
+    // Add table actions (title + download button)
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'table-actions';
+    
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'table-title';
+    titleDiv.textContent = 'Hasil Query';
+    
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'btn-download-csv';
+    downloadBtn.innerHTML = `
+        <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+        </span>
+        <span class="btn-loader"></span>
+        <span class="btn-text">Download Semua (CSV)</span>
+    `;
+    
+    // Store current query for full download
+    downloadBtn.dataset.query = lastQuery || '';
+    downloadBtn.onclick = () => downloadFullCSV(downloadBtn.dataset.query);
+    
+    actionsDiv.appendChild(titleDiv);
+    actionsDiv.appendChild(downloadBtn);
+    wrapper.appendChild(actionsDiv);
+
+    // Table scroll container
     const scrollDiv = document.createElement('div');
     scrollDiv.className = 'table-scroll';
 
@@ -702,20 +805,26 @@ function buildTable(data, totalCount, page = 1) {
     scrollDiv.appendChild(table);
     wrapper.appendChild(scrollDiv);
 
-    // Info + Pagination
+    // Overview info (showing 10 of total)
     if (totalCount && totalCount > data.length) {
         const infoDiv = document.createElement('div');
-        infoDiv.className = 'table-info';
-        const totalPages = Math.ceil(totalCount / pageSize);
-        infoDiv.textContent = `Menampilkan ${(page - 1) * pageSize + 1}–${(page - 1) * pageSize + data.length} dari ${totalCount} data (Halaman ${page} dari ${totalPages})`;
+        infoDiv.className = 'table-overview-info';
+        infoDiv.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>Menampilkan <strong>${data.length} dari ${totalCount}</strong> data sebagai overview. Klik tombol <strong>Download Semua (CSV)</strong> untuk mendapatkan data lengkap.</span>
+        `;
         wrapper.appendChild(infoDiv);
-
-        const pagination = buildPagination(totalCount, page);
-        wrapper.appendChild(pagination);
     }
 
     return wrapper;
 }
+
+// Remove pagination-related functions as they're no longer needed
+// (buildPagination, changePage, sendQueryUpdateBubble can be removed or commented out)
 
 function buildPagination(totalCount, page) {
     const totalPages = Math.ceil(totalCount / pageSize);

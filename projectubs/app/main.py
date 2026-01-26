@@ -22,6 +22,11 @@ from pydantic import BaseModel
 from app.sales_api import router as sales_router
 from app.chatbot import create_bot
 
+from fastapi.responses import StreamingResponse
+import io
+import csv
+from datetime import datetime
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Jewelry Sales AI Chatbot",
@@ -81,20 +86,15 @@ def read_root():
 @app.get("/chat")
 def chat(
     query: str = Query(..., description="Natural language query"),
-    limit: int = Query(10, ge=1, le=50),
-    page: int = Query(1, ge=1),
 ):
+    """
+    Process natural language query and return overview (max 10 rows)
+    """
     try:
         bot_instance = get_bot()
 
-        offset = (page - 1) * limit
-
-        # Pass pagination params separately, NOT embedded in query text
-        result = bot_instance.process_message(query, limit=limit, offset=offset)
-
-        result.setdefault("limit", limit)
-        result.setdefault("offset", offset)
-        result.setdefault("page", page)
+        # Always show only 10 rows for overview
+        result = bot_instance.process_message(query, limit=10, offset=0)
 
         return {
             "status": "success",
@@ -105,21 +105,86 @@ def chat(
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 
-@app.get("/help")
-def help_endpoint():
+# Add new endpoint for full CSV download
+# Update endpoint /chat/download di main.py dengan logging
+
+@app.get("/chat/download")
+def download_chat_results(
+    query: str = Query(..., description="Natural language query for full data export"),
+):
     """
-    Get help information and examples.
+    Download complete query results as CSV (all rows, no limit)
     """
     try:
         bot_instance = get_bot()
-        help_response = bot_instance._handle_help_query()
         
-        return {
-            "status": "success",
-            "help": help_response["message"],
-        }
+        print(f"CSV Download Request:")
+        print(f"   Query: {query}")
+        print(f"   Requesting limit: 100000")
+        
+        # Get ALL results without limit (set high limit)
+        result = bot_instance.process_message(query, limit=100000, offset=0)
+        
+        print(f"   Result keys: {list(result.keys())}")
+        print(f"   Data length: {len(result.get('data', []))}")
+        print(f"   Total count: {result.get('count', 'N/A')}")
+        
+        if not result.get("data"):
+            raise HTTPException(
+                status_code=404, 
+                detail="Tidak ada data ditemukan untuk query ini"
+            )
+        
+        data = result["data"]
+        
+        if len(data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Query tidak menghasilkan data"
+            )
+        
+        print(f"Creating CSV with {len(data)} rows")
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        
+        # Write CSV with proper encoding
+        writer = csv.DictWriter(output, fieldnames=data[0].keys())
+        writer.writeheader()
+        writer.writerows(data)
+        
+        # Prepare response
+        output.seek(0)
+        csv_content = output.getvalue()
+        
+        # Count actual lines in CSV
+        csv_lines = len(csv_content.strip().split('\n'))
+        print(f"CSV created with {csv_lines} lines (including header)")
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"jewelry_sales_{timestamp}.csv"
+        
+        # Return as streaming response
+        return StreamingResponse(
+            iter([csv_content]),
+            media_type="text/csv;charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Type": "text/csv; charset=utf-8",
+            }
+        )
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting help: {str(e)}")
+        import traceback
+        print(f"❌ Error in CSV download:")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error downloading CSV: {str(e)}"
+        )
 
 
 @app.get("/health")
