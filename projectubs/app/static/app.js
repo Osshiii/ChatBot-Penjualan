@@ -1069,8 +1069,180 @@ async function sendQueryUpdateBubble(query, page = 1) {
     btnSend.disabled = false;
     inputMessage.focus();
   }
+
 }
 
+// Number formatting utilities
+
+/**
+ * Format number for display in table
+ * @param {*} value - Value to format
+ * @param {string} columnName - Column name to determine formatting
+ * @param {number} maxDecimals - Maximum decimal places (default 2)
+ * @returns {string} Formatted number
+ */
+function formatTableNumber(value, columnName = '', maxDecimals = 2) {
+    if (value === null || value === undefined || value === '') {
+        return value;
+    }
+    
+    // Check if it's a number
+    const num = parseFloat(value);
+    if (isNaN(num)) {
+        return value; // Return as-is if not a number
+    }
+    
+    // Special case: TAHUN, BULAN, CHANNEL - no thousand separator
+    if (columnName === 'TAHUN' || columnName === 'BULAN' || columnName === 'CHANNEL') {
+        return String(Math.round(num));
+    }
+    
+    // Determine decimal places based on value size
+    let decimals = 0;
+    if (num < 1 && num > 0) {
+        decimals = Math.min(2, maxDecimals); // Small numbers: up to 2 decimals
+    } else if (num < 100) {
+        decimals = Math.min(2, maxDecimals); // Medium numbers: up to 2 decimals
+    } else {
+        decimals = 0; // Large numbers: no decimals
+    }
+    
+    // Round to determined decimals
+    const rounded = num.toFixed(decimals);
+    
+    // Split integer and decimal parts
+    const [intPart, decPart] = rounded.split('.');
+    
+    // Add thousand separators (dot)
+    const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    
+    // Return with comma as decimal separator (if has decimals)
+    if (decPart && parseInt(decPart) !== 0) {
+        return `${formattedInt},${decPart}`;
+    }
+    return formattedInt;
+}
+
+/**
+ * Detect if column contains numeric data
+ */
+function isNumericColumn(columnName) {
+    const numericColumns = [
+        'BERAT_SATUAN', 'BERAT_TOTAL', 'JUMLAH', 'BULAN', 'TAHUN', 'CHANNEL',
+        'count_records', 'total_jumlah', 'total_berat', 'avg_berat', 'min_berat', 'max_berat'
+    ];
+    return numericColumns.includes(columnName);
+}
+
+/**
+ * Build table with proper number formatting
+ */
+function buildTable(data, totalCount, page = 1) {
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+
+    // Add table actions (title + download button)
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'table-actions';
+    
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'table-title';
+    titleDiv.textContent = 'Hasil Query';
+    
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'btn-download-csv';
+    downloadBtn.innerHTML = `
+        <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+        </span>
+        <span class="btn-loader"></span>
+        <span class="btn-text">Download Semua (CSV)</span>
+    `;
+    
+    downloadBtn.dataset.query = lastQuery || '';
+    downloadBtn.onclick = () => downloadFullCSV(downloadBtn.dataset.query);
+    
+    actionsDiv.appendChild(titleDiv);
+    actionsDiv.appendChild(downloadBtn);
+    wrapper.appendChild(actionsDiv);
+
+    // Table scroll container
+    const scrollDiv = document.createElement('div');
+    scrollDiv.className = 'table-scroll';
+
+    const table = document.createElement('table');
+    table.className = 'data-table';
+
+    // Get column names
+    const columns = Object.keys(data[0]);
+
+    // Headers
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    columns.forEach(key => {
+        const th = document.createElement('th');
+        th.textContent = key;
+        th.dataset.col = key;
+        
+        // Add class for numeric columns
+        if (isNumericColumn(key)) {
+            th.classList.add('numeric');
+        }
+        
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement('tbody');
+    data.forEach(row => {
+        const tr = document.createElement('tr');
+        columns.forEach(key => {
+            const td = document.createElement('td');
+            const value = row[key];
+            
+            // Format numeric values
+            if (isNumericColumn(key)) {
+                td.textContent = formatTableNumber(value, key);
+                td.classList.add('numeric');
+                td.dataset.col = key;
+            } else {
+                td.textContent = value;
+            }
+            
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    scrollDiv.appendChild(table);
+    wrapper.appendChild(scrollDiv);
+
+    // Overview info
+    if (totalCount && totalCount > data.length) {
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'table-overview-info';
+        infoDiv.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>Menampilkan <strong>${data.length} dari ${formatTableNumber(totalCount, 0)}</strong> data sebagai overview. Klik tombol <strong>Download Semua (CSV)</strong> untuk mendapatkan data lengkap.</span>
+        `;
+        wrapper.appendChild(infoDiv);
+    }
+
+    return wrapper;
+}
 
 // ==================== UTILITY FUNCTIONS ====================
 function escapeHtml(text) {

@@ -103,7 +103,13 @@ Aturan ketat:
 5) Satuan berat selalu gram (g). Jangan tulis kg.
 6) Output wajib pakai newline dan bullet '-' (jangan paragraf panjang).
 7) JANGAN GUNAKAN BOLD (**text**), ITALIC, atau MARKDOWN. Gunakan teks polos saja.
-8) Angka ribuan pakai separator dot (1.000), angka desimal pakai koma (102,5).
+8) Format angka:
+   - Ribuan: pakai separator titik (1.000, 22.506)
+   - Desimal: pakai koma dan MAKSIMAL 2 angka (102,5 atau 102,52)
+   - Untuk angka besar (>100): TANPA desimal (1.234 bukan 1.234,00)
+   - Untuk angka kecil (<1): maksimal 2 desimal (0,75)
+   - Persentase: maksimal 1 desimal (15,3% bukan 15,345%)
+9) Jangan tampilkan angka dengan banyak desimal seperti 0,0000123 atau 1.234,5678
 """.strip()
 
     mode = (answer_mode or "auto").lower()
@@ -116,6 +122,11 @@ Dilarang menulis "Insight" atau "Saran".
 
 Format WAJIB:
 Ringkasan: <1–2 kalimat>
+
+PENTING - Format angka:
+- Total transaksi: 1.234 (tanpa desimal)
+- Total berat: 1.234,5 g (max 1 desimal)
+- Rata-rata: 15,3 g (max 1 desimal)
 """).strip()
 
     if mode == "insight":
@@ -129,6 +140,11 @@ Insight:
 - <insight 1>
 - <insight 2>
 - <insight 3>
+
+PENTING - Format angka:
+- Kontribusi: 25,5% (max 1 desimal)
+- Jumlah transaksi: 1.234 (tanpa desimal)
+- Berat: 102,5 g (max 1-2 desimal)
 """).strip()
 
     if mode == "saran":
@@ -141,9 +157,13 @@ ATURAN FORMAT WAJIB:
 1) Jangan gunakan bold (**text**), italic, atau markdown formatting lainnya.
 2) Gunakan teks polos saja.
 3) Pemisah baris pakai newline biasa, BUKAN tabel atau ASCII art.
-4) Angka harus menggunakan format:
-   - Ribuan: pakai titik separator (contoh: 1.000, 22.506)
-   - Desimal: pakai koma (contoh: 102,5 gram, 15,3%)
+4) Format angka (SANGAT PENTING):
+   - Ribuan: pakai titik separator (1.000, 22.506)
+   - Desimal: pakai koma, MAKSIMAL 2 angka (102,5 atau 102,52)
+   - Angka besar (>100): TANPA desimal (1.234 bukan 1.234,00)
+   - Persentase: MAKSIMAL 1 desimal (15,3% bukan 15,345%)
+   - JANGAN: 0,0000123 atau 1.234,56789
+   - YA: 1.234 atau 102,5 atau 15,3%
 5) Jangan tampilkan tabel detail/data raw kecuali user EKSPLISIT minta "tampilkan data" atau "lihat semua".
 
 PENTING - Cara kerja membuat SARAN SPESIFIK (bukan generik):
@@ -153,28 +173,25 @@ PENTING - Cara kerja membuat SARAN SPESIFIK (bukan generik):
 4) Lihat 'top_items' atau 'top_lokasi': WAJIB sebut produk/lokasi SPESIFIK (jangan "produk") dengan persentase
 5) LARANGAN: jangan beri saran generik seperti "tingkatkan stok", "buat promosi" tanpa DUKUNG dengan indikator KPI
 
-Contoh saran BENAR (spesifik dengan angka):
+Contoh saran BENAR (spesifik dengan angka TERFORMAT):
 - "Produk MP000197 berkontribusi 25,5% dari total transaksi dengan tren +15,3% → pertimbangkan bundling untuk meningkatkan AOV."
 - "Lokasi Jakarta mendominasi 40,2% transaksi via Tokopedia → optimalkan deskripsi produk di Tokopedia."
 
-Contoh saran SALAH (generik tanpa data):
-- "tingkatkan stok produk"
-- "buat promosi lebih besar"
-- "fokus pada pemasaran digital"
+Contoh saran SALAH:
+- "Produk MP000197 berkontribusi 25,5432234% ..." (desimal terlalu banyak)
+- "tingkatkan stok produk" (generik tanpa data)
 
 TEMPLATE OUTPUT SARAN:
 Saran lanjutan:
-- <saran spesifik dengan KPI 1: ubah/tambah angka sesuai data>
-- <saran spesifik dengan KPI 2: ubah/tambah angka sesuai data>
-- <saran spesifik dengan KPI 3 atau action plan>
+- <saran spesifik dengan KPI terformat: gunakan angka dengan max 1-2 desimal>
+- <saran spesifik dengan KPI terformat: gunakan angka dengan max 1-2 desimal>
+- <saran spesifik dengan KPI atau action plan>
 """).strip()
 
-    # fallback (sebaiknya tidak dipakai)
     return (base + """
 
-Jika mode tidak jelas, tulis jawaban singkat 2-4 bullet.
+Jika mode tidak jelas, tulis jawaban singkat 2-4 bullet dengan angka terformat dengan benar.
 """).strip()
-
 
 def _post_clean(text: str) -> str:
     if not text:

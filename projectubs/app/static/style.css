@@ -778,3 +778,106 @@ body {
 .pagination {
     display: none;
 }
+
+
+/* Enhanced numeric column styling*/
+
+/* Table base styles */
+.data-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+
+.data-table th, .data-table td {
+    border: 1px solid var(--border-light);
+    padding: 10px 14px;
+    text-align: left;
+    white-space: nowrap; /* Prevent text wrapping */
+}
+
+/* Date column - wider for better display */
+.data-table th[data-col="TANGGAL"],
+.data-table td[data-col="TANGGAL"] {
+    min-width: 120px;
+}
+
+/* Numeric columns - right align */
+.data-table th.numeric,
+.data-table td.numeric {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Keep original font (no monospace) */
+.data-table td.numeric {
+    font-family: inherit;
+}
+
+/* Header styling */
+.data-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--gradient-primary);
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+}
+
+.data-table thead th.numeric {
+    text-align: right !important;
+}
+
+/* Row styling */
+.data-table tbody tr:nth-child(even) { 
+    background: var(--bg-secondary); 
+}
+
+.data-table tbody tr:hover { 
+    background: var(--bg-tertiary);
+    transition: background var(--transition-fast);
+}
+
+/* Number cell styling for better readability */
+.data-table td.numeric {
+    color: var(--text-primary);
+    font-weight: inherit; /* Keep original weight */
+}
+
+/* Header styling improvements */
+.data-table thead th {
+    font-weight: 600;
+}
+
+/* Table wrapper improvements */
+.table-scroll {
+    max-height: 400px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    margin-top: 12px;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Scrollbar styling */
+.table-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.table-scroll::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
