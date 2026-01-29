@@ -1073,7 +1073,6 @@ async function sendQueryUpdateBubble(query, page = 1) {
 }
 
 // Number formatting utilities
-
 /**
  * Format number for display in table
  * @param {*} value - Value to format
@@ -1129,7 +1128,8 @@ function formatTableNumber(value, columnName = '', maxDecimals = 2) {
 function isNumericColumn(columnName) {
     const numericColumns = [
         'BERAT_SATUAN', 'BERAT_TOTAL', 'JUMLAH', 'BULAN', 'TAHUN', 'CHANNEL',
-        'count_records', 'total_jumlah', 'total_berat', 'avg_berat', 'min_berat', 'max_berat'
+        'count_records', 'total_jumlah', 'total_berat', 'avg_berat', 'min_berat', 'max_berat',
+        'transaction_count', 'total_qty' // Add aggregate columns
     ];
     return numericColumns.includes(columnName);
 }

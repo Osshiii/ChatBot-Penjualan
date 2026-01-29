@@ -796,25 +796,7 @@ body {
     white-space: nowrap; /* Prevent text wrapping */
 }
 
-/* Date column - wider for better display */
-.data-table th[data-col="TANGGAL"],
-.data-table td[data-col="TANGGAL"] {
-    min-width: 120px;
-}
-
-/* Numeric columns - right align */
-.data-table th.numeric,
-.data-table td.numeric {
-    text-align: right !important;
-    font-variant-numeric: tabular-nums;
-}
-
-/* Keep original font (no monospace) */
-.data-table td.numeric {
-    font-family: inherit;
-}
-
-/* Header styling */
+/* ALL HEADERS - center aligned */
 .data-table thead th {
     position: sticky;
     top: 0;
@@ -824,10 +806,34 @@ body {
     text-transform: uppercase;
     font-size: 11px;
     letter-spacing: 0.05em;
+    text-align: center !important;
 }
 
-.data-table thead th.numeric {
+/* Date column - wider for better display, right align for content */
+.data-table th[data-col="TANGGAL"],
+.data-table td[data-col="TANGGAL"] {
+    min-width: 120px;
+}
+
+.data-table td[data-col="TANGGAL"] {
     text-align: right !important;
+}
+
+/* String columns (kategori, kode_barang, etc) - left align */
+.data-table td[data-col="kategori"],
+.data-table td[data-col="KODE_BARANG"],
+.data-table td[data-col="LOKASI"],
+.data-table td[data-col="KLASIFIKASI_BARANG"],
+.data-table td[data-col="WARNA_BARANG"],
+.data-table td[data-col="UKURAN_BARANG"] {
+    text-align: left !important;
+}
+
+/* Numeric columns - right align (includes TAHUN, BULAN, CHANNEL) */
+.data-table td.numeric {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+    font-family: inherit;
 }
 
 /* Row styling */
@@ -844,11 +850,6 @@ body {
 .data-table td.numeric {
     color: var(--text-primary);
     font-weight: inherit; /* Keep original weight */
-}
-
-/* Header styling improvements */
-.data-table thead th {
-    font-weight: 600;
 }
 
 /* Table wrapper improvements */

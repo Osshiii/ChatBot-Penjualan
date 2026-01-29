@@ -43,6 +43,7 @@ def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -
     Format number with proper Indonesian/European locale separators.
     - Thousands: dot (1.234)
     - Decimal: comma (1,5)
+    - Max 2 decimal places for readability
     """
     if value is None:
         return "0"
@@ -50,13 +51,15 @@ def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -
     try:
         val = float(value)
         
+        # Limit decimals to max 2 for better readability
+        if decimals > 2:
+            decimals = 2
+        
         if decimals == 0:
             # No decimals - just format with thousands separator
             if thousands_sep:
-                # Format as integer with thousands
                 int_val = int(round(val))
                 str_val = str(int_val)
-                # Add dots for thousands
                 parts = []
                 for i, digit in enumerate(reversed(str_val)):
                     if i > 0 and i % 3 == 0:
@@ -66,10 +69,9 @@ def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -
             else:
                 return str(int(round(val)))
         else:
-            # With decimals
+            # With decimals (max 2)
             if thousands_sep:
-                # Split by decimal point
-                formatted = f"{val:.{decimals}f}"  # Use dot for decimal
+                formatted = f"{val:.{decimals}f}"
                 int_part, dec_part = formatted.split('.')
                 
                 # Add dots to integer part for thousands
@@ -83,7 +85,6 @@ def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -
                 # Return with comma as decimal separator
                 return f"{int_formatted},{dec_part}"
             else:
-                # No thousands separator, just replace decimal separator
                 return f"{val:.{decimals}f}".replace('.', ',')
     
     except (ValueError, TypeError):
@@ -91,12 +92,22 @@ def format_number(value: float, decimals: int = 0, thousands_sep: bool = True) -
 
 
 def format_percentage(value: float, decimals: int = 1) -> str:
-    """Format percentage with proper separator."""
+    """Format percentage with max 1 decimal place."""
     try:
-        return f"{float(value):.{decimals}f}%".replace('.', ',')
+        val = float(value)
+        # Max 1 decimal for percentages
+        if decimals > 1:
+            decimals = 1
+        
+        # Format with specified decimals
+        formatted = f"{val:.{decimals}f}"
+        
+        # Replace dot with comma for decimal separator
+        formatted = formatted.replace('.', ',')
+        
+        return f"{formatted}%"
     except (ValueError, TypeError):
         return f"{value}%"
-
 
 # ============================================================
 # Database Layer
@@ -2010,9 +2021,7 @@ class JewelrySalesBot:
 
     def _fallback_suggestion_message(self, kpi_packet: Dict[str, Any], scope: str) -> str:
         """
-        Generate fallback suggestion message when LLM is unavailable.
-        Uses KPI data to provide specific recommendations.
-        Format: Plain text with proper sentence structure, no bullet points.
+        Generate fallback suggestion message with proper number formatting.
         """
         scope_label = {
             "product": "Produk",
@@ -2020,20 +2029,18 @@ class JewelrySalesBot:
             "general": "Penjualan"
         }.get(scope, "Data")
         
-        # Header
         lines = []
         lines.append("Saran Berdasarkan Analisis Data")
         lines.append("")
         
-        # KPI Summary - aligned format
-        total_transaksi = format_number(kpi_packet['total_transactions'], decimals=0, thousands_sep=True)
-        total_berat = format_number(kpi_packet['weight_total_g'], decimals=1, thousands_sep=False)
+        # Format numbers with max 2 decimals
+        total_transaksi = format_number(kpi_packet['total_transactions'], decimals=0)
+        total_berat = format_number(kpi_packet['weight_total_g'], decimals=2)
         
         lines.append(f"Scope           : {scope_label}")
         lines.append(f"Total Transaksi : {total_transaksi}")
         lines.append(f"Total Berat     : {total_berat} g")
         
-        # Channel info if available
         if kpi_packet.get("dominant_channel"):
             channel_name = str(kpi_packet['dominant_channel'])
             channel_pct = format_percentage(kpi_packet.get('dominant_channel_pct', 0), decimals=1)
@@ -2043,7 +2050,6 @@ class JewelrySalesBot:
         lines.append("Analisis dan Rekomendasi:")
         lines.append("")
         
-        # Scope-specific recommendations with full sentence structure
         if scope == "product":
             top_item = kpi_packet['top_items'][0] if kpi_packet['top_items'] else None
             if top_item:
@@ -2077,7 +2083,7 @@ class JewelrySalesBot:
                 item_list = ", ".join([f"{item['kode_barang']} ({format_percentage(item['pct'], 1)})" for item in top_3_items])
                 description_items.append(f"Produk unggulan saat ini adalah {item_list}, yang bersama-sama menunjukkan momentum penjualan terkuat")
             
-            unit_total = format_number(kpi_packet['unit_total'], decimals=0, thousands_sep=True)
+            unit_total = format_number(kpi_packet['unit_total'], decimals=0)
             description_items.append(f"total volume penjualan mencapai {unit_total} unit")
             
             channel_name = str(kpi_packet.get('dominant_channel', 'channel'))
@@ -2087,7 +2093,7 @@ class JewelrySalesBot:
             lines.append(f"Secara keseluruhan, {combined_desc}. Untuk mempercepat pertumbuhan, manfaatkan potensi channel dan produk unggulan ini sebagai fokus utama strategi ekspansi penjualan ke depan.")
         
         return "\n".join(lines)
-
+    
     def _handle_help_query(self) -> Dict[str, Any]:
         message = (
             "📚 Bantuan Query\n\n"
