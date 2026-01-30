@@ -481,34 +481,30 @@ class JewelrySalesBot:
 
             if answer_mode == "ringkasan":
                 response["message"] = (
-                    f"📊 Ringkasan penjualan berdasarkan {group_by}\n"
-                    f"Total transaksi: {total_transaksi:,}\n"
-                    f"Total unit: {total_unit:,.0f}\n"
-                    f"Total berat: {total_berat:,.2f} g\n"
-                    f"Rata-rata berat: {avg_berat:.2f} g/item"
+                    f"Ringkasan {group_by}: {total_transaksi:,} transaksi, "
+                    f"{total_unit:,.0f} unit, {total_berat:,.0f}g, rata-rata {avg_berat:.1f}g/item."
                 )
                 return response
 
             if answer_mode == "insight":
                 top = data[:3]
-                lines = [f"🔎 Insight berdasarkan {group_by}:"]
+                lines = []
                 if not top:
-                    lines.append("- Tidak ada data untuk dianalisis.")
+                    lines.append("Tidak ada data untuk dianalisis.")
                 else:
                     # 1) top transaksi
                     top1 = top[0]
                     lines.append(
-                        f"- Kategori teratas: {top1.get('kategori')} "
-                        f"({int(top1.get('count_records', 0) or 0):,} transaksi, "
-                        f"total {float(top1.get('total_berat', 0) or 0):,.2f} g)."
+                        f"Kategori teratas: {top1.get('kategori')} dengan {int(top1.get('count_records', 0) or 0):,} "
+                        f"transaksi, total {float(top1.get('total_berat', 0) or 0):,.0f}g."
                     )
 
                     # 2) avg tertinggi dari top 20
                     best_avg = max(data, key=lambda r: float(r.get("avg_berat", 0) or 0)) if data else None
                     if best_avg:
                         lines.append(
-                            f"- Rata-rata berat tertinggi: {best_avg.get('kategori')} "
-                            f"({float(best_avg.get('avg_berat', 0) or 0):.2f} g/item)."
+                            f"Berat rata-rata tertinggi: {best_avg.get('kategori')} "
+                            f"({float(best_avg.get('avg_berat', 0) or 0):.1f}g)."
                         )
 
                     # 3) kontribusi 3 besar (berdasarkan total_jumlah)
@@ -516,17 +512,16 @@ class JewelrySalesBot:
                     top3_qty = sum(float(r.get("total_jumlah", 0) or 0) for r in top) if top else 0.0
                     if total_qty_all > 0:
                         share = (top3_qty / total_qty_all) * 100.0
-                        lines.append(f"- 3 kategori teratas menyumbang sekitar {share:.1f}% dari total unit.")
-                response["message"] = "\n".join(lines)
+                        lines.append(f"3 kategori teratas menyumbang {share:.0f}% dari total unit.")
+                response["message"] = " ".join(lines)
                 return response
 
             if answer_mode == "saran":
-                desc = self._describe_filters(filters)
-                lines = ["✅ Saran lanjutan:"]
-                lines.append(f"- Kalau datanya masih terlalu umum {desc}, coba batasi bulan/tahun atau lokasi.")
-                lines.append(f"- Lihat detail kategori teratas di {group_by} untuk cek transaksi per baris (detail query).")
-                lines.append("- Bandingkan per channel/lokasi untuk melihat sumber kontribusi terbesar.")
-                response["message"] = "\n".join(lines)
+                lines = []
+                lines.append("Batasi dengan bulan/tahun/lokasi untuk data lebih spesifik.")
+                lines.append("Review detail kategori teratas menggunakan detail query.")
+                lines.append("Bandingkan per channel dan lokasi untuk kontribusi terbesar.")
+                response["message"] = " ".join(lines)
                 return response
 
             return response
@@ -582,12 +577,8 @@ class JewelrySalesBot:
 
             # Step 4: Build response message
             summary_msg = (
-                f"📅 Transaksi Terbaru: {latest_date}\n"
-                f"Total transaksi: {total_count}\n"
-                f"Total unit: {total_qty:,.0f}\n"
-                f"Total berat: {total_berat:,.2f} g\n"
-                f"Jumlah barang unik: {unique_barang}\n"
-                f"Jumlah lokasi: {unique_lokasi}"
+                f"Transaksi terbaru {latest_date}: {total_count} total, {total_qty:,.0f} unit, "
+                f"{total_berat:,.0f}g, {unique_barang} barang, {unique_lokasi} lokasi."
             )
 
             return {
@@ -609,7 +600,7 @@ class JewelrySalesBot:
         except Exception as e:
             return {
                 "query_type": "latest_transaction",
-                "message": f"❌ Error: {str(e)}",
+                "message": "Gagal mengambil data transaksi terbaru.",
                 "data": [],
                 "confidence": 0.0,
                 "error": str(e),
@@ -1485,10 +1476,10 @@ class JewelrySalesBot:
                     message += f" (and {remaining:,} more…)"
             else:
                 filter_desc = self._describe_filters(filters)
-                message = f"❌ Tidak ada hasil{f' {filter_desc}' if filter_desc else ''}."
+                message = f"Tidak ada hasil{f' {filter_desc}' if filter_desc else ''}."
 
             if relative_warning:
-                message = f"⚠️ {relative_warning}\n\n{message}"
+                message = f"{relative_warning}. {message}"
 
             return {
                 "query_type": "detail",
@@ -1511,7 +1502,7 @@ class JewelrySalesBot:
         except Exception as e:
             return {
                 "query_type": "detail",
-                "message": f"❌ Error: {str(e)}",
+                "message": "Gagal mengambil data penjualan.",
                 "data": [],
                 "sql": "",
                 "filters": filters,
@@ -1532,7 +1523,7 @@ class JewelrySalesBot:
             total = int(count_result[0].get("total", 0)) if count_result else 0
 
             filter_desc = self._describe_filters(filters)
-            message = f"📊 Ditemukan {total:,} transaksi{f' {filter_desc}' if filter_desc else ''}."
+            message = f"Ditemukan {total:,} transaksi{f' {filter_desc}' if filter_desc else ''}."
 
             return {
                 "query_type": "count",
@@ -1547,7 +1538,7 @@ class JewelrySalesBot:
         except Exception as e:
             return {
                 "query_type": "count",
-                "message": f"❌ Error: {str(e)}",
+                "message": "Gagal menghitung jumlah transaksi.",
                 "data": [],
                 "sql": "",
                 "filters": filters,
@@ -1576,11 +1567,11 @@ class JewelrySalesBot:
                 )
 
                 message = (
-                    f"📊 Ringkasan penjualan berdasarkan {group_by}\n"
-                    f"Total transaksi: {total_records:,} | Total qty: {total_qty:,.0f} | Total berat: {total_berat:,.2f} g | Avg berat: {avg_berat:.2f} g/item"
+                    f"Ringkasan {group_by}: {total_records:,} transaksi, {total_qty:,.0f} qty, "
+                    f"{total_berat:,.0f}g, rata-rata {avg_berat:.1f}g/item."
                 )
             else:
-                message = "❌ Tidak ada data untuk ringkasan."
+                message = "Tidak ada data untuk ringkasan."
 
             return {
                 "query_type": "summary",
@@ -1601,7 +1592,7 @@ class JewelrySalesBot:
         except Exception as e:
             return {
                 "query_type": "summary",
-                "message": f"❌ Error executing summary: {str(e)}",
+                "message": "Gagal membuat ringkasan penjualan.",
                 "data": [],
                 "sql": "",
                 "filters": filters,
@@ -1644,11 +1635,11 @@ class JewelrySalesBot:
         if year_list:
             return {
                 "query_type": "exploratory",
-                "message": f"📅 Tahun tersedia: {', '.join(year_list)} (rentang {year_list[0]} - {year_list[-1]})",
+                "message": f"Tahun tersedia: {', '.join(year_list)} (rentang {year_list[0]}-{year_list[-1]}).",
                 "data": years,
                 "confidence": 0.95,
             }
-        return {"query_type": "exploratory", "message": "❌ Data tahun tidak ditemukan.", "data": [], "confidence": 0.7}
+        return {"query_type": "exploratory", "message": "Data tahun tidak ditemukan.", "data": [], "confidence": 0.7}
 
     def _handle_month_range_query(self) -> Dict[str, Any]:
         sql = "SELECT DISTINCT BULAN FROM penjualan ORDER BY BULAN"
@@ -1657,11 +1648,11 @@ class JewelrySalesBot:
         if month_list:
             return {
                 "query_type": "exploratory",
-                "message": f"📆 Bulan tersedia: {', '.join(map(str, month_list))}",
+                "message": f"Bulan tersedia: {', '.join(map(str, month_list))}.",
                 "data": months,
                 "confidence": 0.95,
             }
-        return {"query_type": "exploratory", "message": "❌ Data bulan tidak ditemukan.", "data": [], "confidence": 0.7}
+        return {"query_type": "exploratory", "message": "Data bulan tidak ditemukan.", "data": [], "confidence": 0.7}
 
     def _handle_available_codes_query(self) -> Dict[str, Any]:
         sql = "SELECT DISTINCT KODE_BARANG FROM penjualan LIMIT 20"
@@ -1669,7 +1660,7 @@ class JewelrySalesBot:
         codes = [r.get("KODE_BARANG") for r in rows if r.get("KODE_BARANG")]
         return {
             "query_type": "exploratory",
-            "message": "🏷️ Contoh kode barang: " + (", ".join(codes) if codes else "Tidak ada"),
+            "message": "Contoh kode barang: " + (", ".join(codes) if codes else "Tidak ada."),
             "data": rows,
             "confidence": 0.95,
         }
@@ -1680,7 +1671,7 @@ class JewelrySalesBot:
         locs = [r.get("LOKASI") for r in rows if r.get("LOKASI")]
         return {
             "query_type": "exploratory",
-            "message": "📍 Contoh lokasi: " + (", ".join(locs) if locs else "Tidak ada"),
+            "message": "Contoh lokasi: " + (", ".join(locs) if locs else "Tidak ada."),
             "data": rows,
             "confidence": 0.95,
         }
@@ -1691,7 +1682,7 @@ class JewelrySalesBot:
         channels = [str(r.get("CHANNEL")) for r in rows if r.get("CHANNEL") is not None]
         return {
             "query_type": "exploratory",
-            "message": "📡 Channel tersedia: " + (", ".join(channels) if channels else "Tidak ada"),
+            "message": "Channel tersedia: " + (", ".join(channels) if channels else "Tidak ada."),
             "data": rows,
             "confidence": 0.95,
         }
@@ -1702,7 +1693,7 @@ class JewelrySalesBot:
         info = res[0] if res else {}
         return {
             "query_type": "exploratory",
-            "message": f"📊 Total transaksi: {int(info.get('total_records', 0)):,} | Periode: {info.get('min_date')} - {info.get('max_date')}",
+            "message": f"Total {int(info.get('total_records', 0)):,} transaksi, periode {info.get('min_date')} s/d {info.get('max_date')}.",
             "data": res,
             "confidence": 0.95,
         }
@@ -1736,11 +1727,11 @@ class JewelrySalesBot:
         
         # Fallback jika LLM tidak tersedia
         fallback_responses = {
-            "halo": "Halo! 👋 Ada yang bisa saya bantu tentang penjualan perhiasan?",
-            "hai": "Hai! 😊 Silakan tanya tentang data penjualan Anda.",
-            "apa kabar": "Saya baik-baik saja! Bagaimana dengan Anda? Ada pertanyaan tentang penjualan?",
-            "bisa apa": "Saya bisa membantu Anda dengan:\n- 📊 Ringkasan penjualan\n- 📈 Analisis per lokasi/produk\n- 💡 Saran strategi penjualan\n- 🔍 Pencarian data spesifik",
-            "siapa kamu": "Saya adalah asisten AI untuk analisis penjualan perhiasan. Saya siap membantu Anda menganalisis data dan memberikan insight bisnis!",
+            "halo": "Halo! Ada yang bisa saya bantu tentang penjualan perhiasan?",
+            "hai": "Hai! Silakan tanya tentang data penjualan Anda.",
+            "apa kabar": "Baik-baik saja! Ada pertanyaan tentang penjualan?",
+            "bisa apa": "Saya bisa: ringkasan penjualan, analisis per lokasi/produk, saran strategi, pencarian data spesifik.",
+            "siapa kamu": "Asisten AI untuk analisis penjualan perhiasan, siap membantu Anda menganalisis data & memberikan insight bisnis!",
         }
         
         normalized = (user_message or "").lower().strip()
@@ -1755,7 +1746,7 @@ class JewelrySalesBot:
         
         return {
             "query_type": "general",
-            "message": "Terima kasih atas pesan Anda! 😊 Silakan tanya tentang data penjualan perhiasan Anda.",
+            "message": "Terima kasih atas pesan Anda! Silakan tanya tentang data penjualan perhiasan Anda.",
             "data": [],
             "confidence": 0.75,
         }
@@ -2025,66 +2016,26 @@ class JewelrySalesBot:
         Focus purely on business recommendations without numeric data.
         """
         lines = []
-        lines.append("Saran Bisnis:")
-        lines.append("")
         
         if scope == "product":
             top_item = kpi_packet['top_items'][0] if kpi_packet['top_items'] else None
-            if top_item:
-                lines.append(f"Produk {top_item['kode_barang']} memerlukan perhatian khusus untuk optimalisasi performa. Berikut adalah rekomendasi strategis:")
-            else:
-                lines.append("Produk ini memerlukan evaluasi dan optimalisasi lebih lanjut. Berikut adalah rekomendasi strategis:")
-            
-            lines.append("")
-            lines.append("- Lakukan evaluasi mendalam terhadap produk untuk memahami positioning-nya di pasar")
-            lines.append("- Pertimbangkan untuk menyesuaikan strategi pemasaran berdasarkan tren pasar terkini")
-            lines.append("- Eksplorasi peluang bundling dengan produk lain untuk meningkatkan daya tarik")
-            lines.append("- Analisis preferensi dan feedback pelanggan untuk identifikasi area perbaikan")
-            lines.append("- Pertimbangkan revitalisasi produk melalui peningkatan desain atau fitur tambahan jika diperlukan")
-            lines.append("- Pastikan strategi penetapan harga kompetitif dan menarik bagi target pasar")
+            prod = top_item['kode_barang'] if top_item else "produk ini"
+            lines.append(f"Produk {prod}: evaluasi positioning, optimalkan pemasaran, pertimbangkan bundling, analisis feedback, sesuaikan harga.")
         
         elif scope == "location":
             top_loc = kpi_packet['top_locations'][0] if kpi_packet['top_locations'] else None
-            if top_loc:
-                lines.append(f"Lokasi {top_loc['lokasi']} menunjukkan potensi yang signifikan. Berikut adalah rekomendasi strategis:")
-            else:
-                lines.append("Lokasi ini memiliki potensi untuk pengembangan lebih lanjut. Berikut adalah rekomendasi strategis:")
-            
-            lines.append("")
-            lines.append("- Identifikasi channel penjualan yang paling efektif di lokasi tersebut")
-            lines.append("- Lakukan optimalisasi mix produk sesuai dengan preferensi lokal pelanggan")
-            lines.append("- Kembangkan inisiatif pemasaran yang disesuaikan dengan karakteristik unik lokasi")
-            lines.append("- Tingkatkan engagement dengan pelanggan melalui promosi dan program loyalitas")
-            lines.append("- Analisis kompetisi lokal dan pastikan positioning yang kompetitif")
-            lines.append("- Pertimbangkan ekspansi atau peningkatan resource jika performa mendukung")
+            lokasi = top_loc['lokasi'] if top_loc else "lokasi ini"
+            lines.append(f"Lokasi {lokasi}: identifikasi channel efektif, optimalkan mix produk, kembangkan promosi lokal, tingkatkan engagement, analisis kompetisi.")
         
         else:  # general scope
-            lines.append("Portfolio penjualan Anda menunjukkan dinamika yang perlu diperhatikan. Berikut adalah rekomendasi strategis umum:")
-            lines.append("")
-            lines.append("- Fokus pada produk dengan performa terkuat dan tingkatkan investasi pemasaran untuk mereka")
-            lines.append("- Analisis produk dengan performa lebih rendah dan tentukan apakah perlu revitalisasi atau penghentian")
-            lines.append("- Optimalkan strategi penetrasi pasar di lokasi-lokasi dengan potensi tinggi")
-            lines.append("- Evaluasi efektivitas setiap channel penjualan dan alokasikan resource secara strategis")
-            lines.append("- Kembangkan program bundling produk untuk meningkatkan average order value")
-            lines.append("- Pertahankan komunikasi yang konsisten dengan pelanggan untuk memahami kebutuhan mereka")
-            lines.append("- Lakukan monitoring berkelanjutan terhadap tren pasar dan sesuaikan strategi sesuai kebutuhan")
+            lines.append("Fokus produk terkuat, analisis produk lemah, optimalkan penetrasi pasar, evaluasi channel, kembangkan bundling, monitor tren.")
         
-        return "\n".join(lines)
+        return " ".join(lines)
     
     def _handle_help_query(self) -> Dict[str, Any]:
         message = (
-            "📚 Bantuan Query\n\n"
-            "Contoh:\n"
-            "- Tampilkan penjualan MP000197 bulan 4 tahun 2022\n"
-            "- Penjualan lokasi LO000048\n"
-            "- Berat 5 sampai 10\n"
-            "- Ringkasan per lokasi\n\n"
-            "Kode:\n"
-            "- KODE_BARANG: MP000xxx\n"
-            "- LOKASI: LO000xxx\n"
-            "- KLASIFIKASI: KD000xxx\n"
-            "- WARNA: PL000xxx\n"
-            "- UKURAN: SZ000xxx\n"
+            "Bantuan Query. Contoh: penjualan MP000197 bulan 4, lokasi LO000048, berat 5-10, ringkasan per lokasi. "
+            "Kode: KODE_BARANG MP000xxx, LOKASI LO000xxx, KLASIFIKASI KD000xxx, WARNA PL000xxx, UKURAN SZ000xxx."
         )
         return {"query_type": "help", "message": message}
 
@@ -2092,10 +2043,7 @@ class JewelrySalesBot:
         conf = parsed_query.get("confidence", 0.0)
         return {
             "query_type": "unknown",
-            "message": (
-                f"❓ Query belum terbaca (confidence: {conf:.0%}).\n"
-                f"Coba sebut kode (MP000xxx/LO000xxx) atau minta 'ringkasan per lokasi'."
-            ),
+            "message": f"Query kurang jelas (confidence {conf:.0%}). Coba sebut kode produk/lokasi atau minta ringkasan per kategori.",
             "confidence": conf,
         }
 
