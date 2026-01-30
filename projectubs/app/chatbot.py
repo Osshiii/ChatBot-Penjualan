@@ -2021,76 +2021,53 @@ class JewelrySalesBot:
 
     def _fallback_suggestion_message(self, kpi_packet: Dict[str, Any], scope: str) -> str:
         """
-        Generate fallback suggestion message with proper number formatting.
+        Generate qualitative-only suggestion message with NO numbers, percentages, or statistics.
+        Focus purely on business recommendations without numeric data.
         """
-        scope_label = {
-            "product": "Produk",
-            "location": "Lokasi",
-            "general": "Penjualan"
-        }.get(scope, "Data")
-        
         lines = []
-        lines.append("Saran Berdasarkan Analisis Data")
-        lines.append("")
-        
-        # Format numbers with max 2 decimals
-        total_transaksi = format_number(kpi_packet['total_transactions'], decimals=0)
-        total_berat = format_number(kpi_packet['weight_total_g'], decimals=2)
-        
-        lines.append(f"Scope           : {scope_label}")
-        lines.append(f"Total Transaksi : {total_transaksi}")
-        lines.append(f"Total Berat     : {total_berat} g")
-        
-        if kpi_packet.get("dominant_channel"):
-            channel_name = str(kpi_packet['dominant_channel'])
-            channel_pct = format_percentage(kpi_packet.get('dominant_channel_pct', 0), decimals=1)
-            lines.append(f"Channel Dominan : {channel_name} ({channel_pct})")
-        
-        lines.append("")
-        lines.append("Analisis dan Rekomendasi:")
+        lines.append("Saran Bisnis:")
         lines.append("")
         
         if scope == "product":
             top_item = kpi_packet['top_items'][0] if kpi_packet['top_items'] else None
             if top_item:
-                item_pct = format_percentage(top_item['pct'], decimals=1)
-                lines.append(f"Berdasarkan data, produk {top_item['kode_barang']} memiliki kontribusi sebesar {item_pct} dari total transaksi yang terjadi. Produk ini menunjukkan peran penting dalam portofolio penjualan Anda.")
-            
-            trend_pct = format_percentage(abs(kpi_packet['trend_vs_previous']), decimals=1)
-            if kpi_packet.get('trend_growth'):
-                lines.append(f"Tren penjualan menunjukkan peningkatan sebesar {trend_pct} dibandingkan dengan periode sebelumnya. Hal ini merupakan sinyal positif yang menunjukkan akselerasi penjualan. Disarankan untuk mempertahankan momentum ini dengan menjaga konsistensi stok, memperkuat promosi, dan memastikan kepuasan pelanggan tetap tinggi.")
+                lines.append(f"Produk {top_item['kode_barang']} memerlukan perhatian khusus untuk optimalisasi performa. Berikut adalah rekomendasi strategis:")
             else:
-                lines.append(f"Tren penjualan mengalami penurunan sebesar {trend_pct} dibandingkan dengan periode sebelumnya. Kondisi ini memerlukan perhatian khusus untuk dapat memulihkan performa produk. Beberapa strategi yang dapat dipertimbangkan adalah revitalisasi produk melalui desain atau fitur baru, melakukan bundling dengan produk lainnya, menyesuaikan strategi pemasaran, atau melakukan analisis mendalam tentang preferensi pasar saat ini.")
+                lines.append("Produk ini memerlukan evaluasi dan optimalisasi lebih lanjut. Berikut adalah rekomendasi strategis:")
             
-            lines.append(f"Pastikan strategi pemasaran disesuaikan dengan kondisi pasar terkini dan feedback dari pelanggan untuk hasil yang optimal.")
+            lines.append("")
+            lines.append("- Lakukan evaluasi mendalam terhadap produk untuk memahami positioning-nya di pasar")
+            lines.append("- Pertimbangkan untuk menyesuaikan strategi pemasaran berdasarkan tren pasar terkini")
+            lines.append("- Eksplorasi peluang bundling dengan produk lain untuk meningkatkan daya tarik")
+            lines.append("- Analisis preferensi dan feedback pelanggan untuk identifikasi area perbaikan")
+            lines.append("- Pertimbangkan revitalisasi produk melalui peningkatan desain atau fitur tambahan jika diperlukan")
+            lines.append("- Pastikan strategi penetapan harga kompetitif dan menarik bagi target pasar")
         
         elif scope == "location":
             top_loc = kpi_packet['top_locations'][0] if kpi_packet['top_locations'] else None
             if top_loc:
-                loc_pct = format_percentage(top_loc['pct'], decimals=1)
-                lines.append(f"Lokasi {top_loc['lokasi']} menunjukkan performa terbaik dengan kontribusi sebesar {loc_pct} dari total transaksi. Wilayah ini dapat dijadikan sebagai fokus utama pengembangan bisnis dan ekspansi lebih lanjut.")
+                lines.append(f"Lokasi {top_loc['lokasi']} menunjukkan potensi yang signifikan. Berikut adalah rekomendasi strategis:")
+            else:
+                lines.append("Lokasi ini memiliki potensi untuk pengembangan lebih lanjut. Berikut adalah rekomendasi strategis:")
             
-            channel_name = str(kpi_packet.get('dominant_channel', 'N/A'))
-            channel_pct = format_percentage(kpi_packet.get('dominant_channel_pct', 0), decimals=1)
-            lines.append(f"Channel {channel_name} menunjukkan dominansi dengan {channel_pct} dari total transaksi di region ini. Ini menunjukkan preferensi pelanggan yang kuat terhadap channel penjualan tersebut.")
-            
-            lines.append(f"Untuk meningkatkan performa, optimalisasikan mix produk lokal sesuai dengan preferensi channel yang dominan. Pertimbangkan juga untuk melakukan inisiatif promosi khusus yang disesuaikan dengan karakteristik unik setiap lokasi dan channel.")
+            lines.append("")
+            lines.append("- Identifikasi channel penjualan yang paling efektif di lokasi tersebut")
+            lines.append("- Lakukan optimalisasi mix produk sesuai dengan preferensi lokal pelanggan")
+            lines.append("- Kembangkan inisiatif pemasaran yang disesuaikan dengan karakteristik unik lokasi")
+            lines.append("- Tingkatkan engagement dengan pelanggan melalui promosi dan program loyalitas")
+            lines.append("- Analisis kompetisi lokal dan pastikan positioning yang kompetitif")
+            lines.append("- Pertimbangkan ekspansi atau peningkatan resource jika performa mendukung")
         
         else:  # general scope
-            description_items = []
-            if kpi_packet['top_items']:
-                top_3_items = kpi_packet['top_items'][:3]
-                item_list = ", ".join([f"{item['kode_barang']} ({format_percentage(item['pct'], 1)})" for item in top_3_items])
-                description_items.append(f"Produk unggulan saat ini adalah {item_list}, yang bersama-sama menunjukkan momentum penjualan terkuat")
-            
-            unit_total = format_number(kpi_packet['unit_total'], decimals=0)
-            description_items.append(f"total volume penjualan mencapai {unit_total} unit")
-            
-            channel_name = str(kpi_packet.get('dominant_channel', 'channel'))
-            description_items.append(f"channel {channel_name} menunjukkan dominansi dalam penjualan")
-            
-            combined_desc = ", ".join(description_items)
-            lines.append(f"Secara keseluruhan, {combined_desc}. Untuk mempercepat pertumbuhan, manfaatkan potensi channel dan produk unggulan ini sebagai fokus utama strategi ekspansi penjualan ke depan.")
+            lines.append("Portfolio penjualan Anda menunjukkan dinamika yang perlu diperhatikan. Berikut adalah rekomendasi strategis umum:")
+            lines.append("")
+            lines.append("- Fokus pada produk dengan performa terkuat dan tingkatkan investasi pemasaran untuk mereka")
+            lines.append("- Analisis produk dengan performa lebih rendah dan tentukan apakah perlu revitalisasi atau penghentian")
+            lines.append("- Optimalkan strategi penetrasi pasar di lokasi-lokasi dengan potensi tinggi")
+            lines.append("- Evaluasi efektivitas setiap channel penjualan dan alokasikan resource secara strategis")
+            lines.append("- Kembangkan program bundling produk untuk meningkatkan average order value")
+            lines.append("- Pertahankan komunikasi yang konsisten dengan pelanggan untuk memahami kebutuhan mereka")
+            lines.append("- Lakukan monitoring berkelanjutan terhadap tren pasar dan sesuaikan strategi sesuai kebutuhan")
         
         return "\n".join(lines)
     

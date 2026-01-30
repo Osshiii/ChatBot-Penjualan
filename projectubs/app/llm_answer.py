@@ -150,42 +150,41 @@ PENTING - Format angka:
     if mode == "saran":
         return (base + """
 
-Kamu HANYA boleh mengeluarkan bagian "Saran lanjutan" saja.
+Kamu HANYA boleh mengeluarkan bagian "Saran Bisnis" saja.
 Dilarang menulis "Ringkasan" atau "Insight".
 
-ATURAN FORMAT WAJIB:
-1) Jangan gunakan bold (**text**), italic, atau markdown formatting lainnya.
-2) Gunakan teks polos saja.
-3) Pemisah baris pakai newline biasa, BUKAN tabel atau ASCII art.
-4) Format angka (SANGAT PENTING):
-   - Ribuan: pakai titik separator (1.000, 22.506)
-   - Desimal: pakai koma, MAKSIMAL 2 angka (102,5 atau 102,52)
-   - Angka besar (>100): TANPA desimal (1.234 bukan 1.234,00)
-   - Persentase: MAKSIMAL 1 desimal (15,3% bukan 15,345%)
-   - JANGAN: 0,0000123 atau 1.234,56789
-   - YA: 1.234 atau 102,5 atau 15,3%
-5) Jangan tampilkan tabel detail/data raw kecuali user EKSPLISIT minta "tampilkan data" atau "lihat semua".
+ATURAN SANGAT PENTING:
+1) **JANGAN** gunakan angka, persentase, atau statistik APAPUN dalam saran!
+2) **JANGAN** menyebut tren, peningkatan, penurunan, atau perubahan numerik
+3) **JANGAN** tampilkan data raw, tabel, atau informasi kuantitatif
+4) Fokus HANYA pada rekomendasi bisnis kualitatif yang bersifat strategis
+5) Gunakan teks polos - jangan ada bold (**text**), italic, atau markdown
 
-PENTING - Cara kerja membuat SARAN SPESIFIK (bukan generik):
-1) Baca 'scope' di KPI: kalau "product" → saran strategi produk; kalau "location" → saran strategi lokasi
-2) Lihat 'total_transaksi' dan 'channel_dominan': fokus saran pada channel yang paling banyak transaksi
-3) Lihat 'tren_arah' (growing/declining): kalau tumbuh → pertahankan momentum; kalau menurun → beri strategi revitalisasi
-4) Lihat 'top_items' atau 'top_lokasi': WAJIB sebut produk/lokasi SPESIFIK (jangan "produk") dengan persentase
-5) LARANGAN: jangan beri saran generik seperti "tingkatkan stok", "buat promosi" tanpa DUKUNG dengan indikator KPI
+KONTEN YANG WAJIB DISERTAKAN:
+Berikan rekomendasi strategis yang bersifat umum dan universal, seperti:
+- Evaluasi produk/lokasi dalam konteks portfolio penjualan
+- Saran untuk menyesuaikan strategi pemasaran
+- Eksplorasi peluang bundling atau kerjasama strategis
+- Analisis preferensi pelanggan dan feedback
+- Pertimbangan repositioning atau revitalisasi
+- Optimalisasi mix produk atau alokasi resource
 
-Contoh saran BENAR (spesifik dengan angka TERFORMAT):
-- "Produk MP000197 berkontribusi 25,5% dari total transaksi dengan tren +15,3% → pertimbangkan bundling untuk meningkatkan AOV."
-- "Lokasi Jakarta mendominasi 40,2% transaksi via Tokopedia → optimalkan deskripsi produk di Tokopedia."
+CONTOH SARAN YANG BENAR:
+- "Produk ini memerlukan evaluasi mendalam untuk memahami positioning-nya di pasar."
+- "Pertimbangkan untuk menyesuaikan strategi pemasaran berdasarkan tren pasar terkini."
+- "Eksplorasi peluang bundling dengan produk lain untuk meningkatkan daya tarik."
 
-Contoh saran SALAH:
-- "Produk MP000197 berkontribusi 25,5432234% ..." (desimal terlalu banyak)
-- "tingkatkan stok produk" (generik tanpa data)
+CONTOH SARAN YANG SALAH:
+- "Produk ini berkontribusi 25,5% dari total transaksi..." (mengandung angka)
+- "Tren penjualan meningkat sebesar 15,3%..." (mengandung persentase)
+- "Total transaksi mencapai 1.234 unit..." (mengandung statistik)
 
 TEMPLATE OUTPUT SARAN:
-Saran lanjutan:
-- <saran spesifik dengan KPI terformat: gunakan angka dengan max 1-2 desimal>
-- <saran spesifik dengan KPI terformat: gunakan angka dengan max 1-2 desimal>
-- <saran spesifik dengan KPI atau action plan>
+Saran Bisnis:
+- <rekomendasi strategis tanpa angka atau persentase>
+- <rekomendasi strategis tanpa angka atau persentase>
+- <rekomendasi strategis tanpa angka atau persentase>
+- <rekomendasi strategis tanpa angka atau persentase>
 """).strip()
 
     return (base + """
